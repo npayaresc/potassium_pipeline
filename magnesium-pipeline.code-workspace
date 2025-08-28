@@ -1,0 +1,58 @@
+{
+    "folders": [
+        {
+            "path": "."
+        }
+    ],
+    "settings": {
+        "python.defaultInterpreterPath": "./.venv/bin/python",
+        "python.terminal.activateEnvironment": true,
+        "python.analysis.autoSearchPaths": true,
+        "python.analysis.indexing": true,
+        "python.analysis.diagnosticMode": "workspace",
+        "python.analysis.autoImportCompletions": true,
+        "python.analysis.include": ["**/*.py"],
+        "python.analysis.exclude": [
+            "**/node_modules",
+            "**/.git",
+            "**/.*",
+            "**/__pycache__"
+        ],
+        "python.analysis.extraPaths": [
+            "./src",
+            "./"
+        ],
+        "files.associations": {
+            "*.py": "python"
+        },
+        "outline.showFiles": true,
+        "outline.showModules": true,
+        "outline.showClasses": true,
+        "outline.showMethods": true,
+        "outline.showFunctions": true,
+        "outline.showVariables": true,
+        "outline.showConstants": true,
+        "cursorpyright.analysis.autoImportCompletions": true,
+        "cursorpyright.analysis.autoSearchPaths": true,
+        "cursorpyright.analysis.diagnosticMode": "workspace",
+        "cursorpyright.analysis.exclude": [
+            "**/node_modules",
+            "**/.git",
+            "**/.*",
+            "**/__pycache__"
+        ],
+        "cursorpyright.analysis.extraPaths": [
+            "./src",
+            "./"
+        ],
+        "cursorpyright.analysis.include": [
+            "**/*.py"
+        ]
+    },
+    "extensions": {
+        "recommendations": [
+            "ms-python.python",
+            "ms-python.pylint"
+        ]
+    }
+}

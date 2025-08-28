@@ -1,0 +1,85 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific - exclude ALL data and output directories
+# Data will be downloaded from GCS at runtime, not included in image
+bad_files/
+bad_prediction_files/
+logs/
+reports/
+models/
+catboost_info/
+data/
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+*.onnx
+
+# Exclude test files
+test_*.py
+tests/
+*_test.py
+
+# Deployment files (not needed in container)
+deploy/
+cloudbuild.yaml
+.gcloudignore
+
+# Config files that aren't needed
+config/*.yml
+!config/cloud_config.yml
+
+# Notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# Large or temporary files
+*.csv
+*.xlsx
+*.xls
+*.json
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.sqlite
+*.db
+*.log
+*.tmp
+*.temp
+*.bak
+
+# Documentation (keep)
+!README.md
+!CLAUDE.md
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml

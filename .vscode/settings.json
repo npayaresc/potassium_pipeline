@@ -1,0 +1,67 @@
+{
+    "python.defaultInterpreterPath": "./.venv/bin/python",
+    "python.analysis.autoSearchPaths": true,
+    "python.analysis.indexing": true,
+    "python.analysis.packageIndexDepths": [
+        {
+            "name": "",
+            "depth": 10,
+            "includeAllSymbols": true
+        }
+    ],
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.diagnosticMode": "workspace",
+    "python.analysis.stubPath": "./.venv/lib/python3.12/site-packages",
+    "python.analysis.extraPaths": [
+        "./src",
+        "./"
+    ],
+    "python.analysis.include": [
+        "**/*.py"
+    ],
+    "python.analysis.exclude": [
+        "**/node_modules",
+        "**/.git",
+        "**/.*"
+    ],
+    "outline.showFiles": true,
+    "outline.showModules": true,
+    "outline.showNamespaces": true,
+    "outline.showPackages": true,
+    "outline.showClasses": true,
+    "outline.showMethods": true,
+    "outline.showProperties": true,
+    "outline.showFields": true,
+    "outline.showConstructors": true,
+    "outline.showEnums": true,
+    "outline.showInterfaces": true,
+    "outline.showFunctions": true,
+    "outline.showVariables": true,
+    "outline.showConstants": true,
+    "outline.showStrings": true,
+    "outline.showNumbers": true,
+    "outline.showBooleans": true,
+    "outline.showArrays": true,
+    "outline.showObjects": true,
+    "outline.showKeys": true,
+    "outline.showNull": true,
+    "outline.problems.enabled": true,
+    "outline.problems.colors": true,
+    "outline.problems.badges": true,
+    "cursorpyright.analysis.autoImportCompletions": true,
+    "cursorpyright.analysis.autoSearchPaths": true,
+    "cursorpyright.analysis.diagnosticMode": "workspace",
+    "cursorpyright.analysis.exclude": [
+        "**/node_modules",
+        "**/.git",
+        "**/.*"
+    ],
+    "cursorpyright.analysis.extraPaths": [
+        "./src",
+        "./"
+    ],
+    "cursorpyright.analysis.include": [
+        "**/*.py"
+    ],
+    "cursorpyright.analysis.stubPath": "./.venv/lib/python3.12/site-packages"
+}

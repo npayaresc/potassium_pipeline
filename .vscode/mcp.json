@@ -1,0 +1,98 @@
+{
+  "servers": {
+    "gemini-coding": {
+      "type": "stdio",
+      "command": "/home/payanico/mcp-gemini-assistant/start_server.sh",
+      "args": [],
+      "env": {}
+    },
+    "context7": {
+      "type": "sse",
+      "url": "https://mcp.context7.com/sse"
+    },
+    "n8n-mcp": {
+      "type": "http",
+      "url": "https://gitmcp.io/czlonkowski/n8n-mcp"
+    },
+    "n8n-workflows": {
+      "type": "http",
+      "url": "https://gitmcp.io/Zie619/n8n-workflows"
+    },
+    "singlestore-notebooks": {
+      "type": "http",
+      "url": "https://gitmcp.io/singlestore-labs/spaces-notebooks"
+    },
+    "singlestore-tutorials": {
+      "type": "http",
+      "url": "https://gitmcp.io/singlestore-labs/singlestore-tutorials"
+    },
+    "firecrawl": {
+      "type": "sse",
+      "url": "https://mcp.firecrawl.dev/fc-eda3421033f4490c9dbcf27125803f25/sse"
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"],
+      "env": {}
+    },
+    "puppeteer": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+      "env": {}
+    },
+    "magic": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@21st-dev/magic@latest",
+        "API_KEY=364e4cc1e959ee4c5c552b4f2066a187d7a30fac7572e922cf2af837cb53398a"
+      ],
+      "env": {}
+    },
+    "s2-mcp": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["singlestore-mcp-server", "start"],
+      "env": {}
+    },
+    "sequential-thinking": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+      "env": {}
+    },
+    "ref": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["ref-tools-mcp@latest"],
+      "env": {
+        "REF_API_KEY": "ref-d06635413c1f9568a3e8"
+      }
+    },
+    "semgrep": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["semgrep-mcp"],
+      "env": {
+        "SEMGREP_APP_TOKEN": "04af3c79edc42ab66dac4d3b4eacc0a24d70f21fdef9051879d99934dca4b246"
+      }
+    },
+    "exasearch": {
+      "type": "stdio",
+      "command": "exa-mcp-server",
+      "args": [],
+      "env": {
+        "EXA_API_KEY": "8654ce73-d144-4739-9cc8-073b185c5ad2"
+      }
+    },
+    "taskmaster-ai": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "task-master-ai@latest"],
+      "env": {}
+    }
+  }
+}

@@ -1,0 +1,104 @@
+x-common-environment: &common-env
+  NVIDIA_VISIBLE_DEVICES: all
+  NVIDIA_DRIVER_CAPABILITIES: compute,utility
+  GPU_ENABLED: true
+  STORAGE_TYPE: local
+  API_HOST: 0.0.0.0
+  API_PORT: 8000
+  LOG_LEVEL: INFO
+
+x-common-volumes: &common-volumes
+  - ./data:/app/data
+  - ./models:/app/models
+  - ./reports:/app/reports
+  - ./logs:/app/logs
+  - ./bad_files:/app/bad_files
+  - ./bad_prediction_files:/app/bad_prediction_files
+  - ./config:/app/config:ro
+
+x-gpu-deploy: &gpu-deploy
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: 1
+          capabilities: [gpu]
+
+services:
+  # Main pipeline service for training
+  magnesium-pipeline:
+    build:
+      context: .
+      target: production
+      dockerfile: Dockerfile
+    container_name: magnesium-pipeline-local
+    environment: *common-env
+    volumes: *common-volumes
+    deploy:
+      <<: *gpu-deploy
+    restart: unless-stopped
+    profiles:
+      - pipeline
+
+  # API service for serving predictions and training
+  magnesium-api:
+    build:
+      context: .
+      target: production
+      dockerfile: Dockerfile
+    container_name: magnesium-api-local
+    ports:
+      - "8000:8000"
+    environment: *common-env
+    volumes: *common-volumes
+    deploy:
+      <<: *gpu-deploy
+    restart: unless-stopped
+    command: ["uv", "run", "--prerelease=allow", "python", "api_server.py"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development environment with Jupyter
+  magnesium-dev:
+    build:
+      context: .
+      target: development
+      dockerfile: Dockerfile
+    container_name: magnesium-dev-local
+    ports:
+      - "8888:8888"
+      - "8001:8000"  # Alternative API port for dev
+    environment:
+      <<: *common-env
+      JUPYTER_ENABLE_LAB: yes
+    volumes:
+      # Mount entire project for development
+      - .:/app
+    deploy:
+      <<: *gpu-deploy
+    command: ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''"]
+    profiles:
+      - dev
+
+  # Simple training job runner
+  magnesium-train:
+    build:
+      context: .
+      target: production  
+      dockerfile: Dockerfile
+    container_name: magnesium-train-local
+    environment: *common-env
+    volumes: *common-volumes
+    deploy:
+      <<: *gpu-deploy
+    profiles:
+      - train
+    entrypoint: ["/bin/bash", "-c"]
+
+networks:
+  default:
+    name: magnesium-network

@@ -1,0 +1,48 @@
+# Option 1: Use NVIDIA PyTorch image with pre-installed ML stack
+FROM nvcr.io/nvidia/pytorch:24.08-py3 as base
+
+# Most ML libraries are already installed!
+# Just add your specific dependencies
+RUN pip install --no-cache-dir \
+    autogluon \
+    lightgbm \
+    catboost \
+    optuna
+
+WORKDIR /app
+COPY . .
+
+# ============================================
+# Option 2: Create cached base with all dependencies
+FROM nvidia/cuda:12.9.0-cudnn-devel-ubuntu22.04 as ml-base
+
+# Install Python and all ML dependencies once
+RUN apt-get update && apt-get install -y python3.12 python3-pip \
+    && pip3 install --no-cache-dir \
+        torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 \
+        numpy pandas scikit-learn matplotlib seaborn \
+        xgboost catboost lightgbm \
+        autogluon optuna \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Save this as your base image:
+# docker build -t magnesium-ml-base:latest -f Dockerfile.optimized --target ml-base .
+# Then use FROM magnesium-ml-base:latest in your main Dockerfile
+
+# ============================================
+# Option 3: Use Docker BuildKit cache mounts for pip
+FROM nvidia/cuda:12.9.0-cudnn-devel-ubuntu22.04 as base
+
+RUN apt-get update && apt-get install -y python3.12 python3-pip
+
+# Use BuildKit cache mount for pip packages
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install torch xgboost catboost lightgbm autogluon \
+    scikit-learn pandas numpy matplotlib
+
+WORKDIR /app
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install -r requirements.txt
+
+COPY . .

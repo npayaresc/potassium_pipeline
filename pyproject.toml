@@ -1,0 +1,32 @@
+[project]
+name = "magnesium-pipeline"
+version = "0.1.0"
+description = "Machine learning pipeline for magnesium concentration prediction from LIBS spectral data"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+ "autogluon>=1.4.0",
+ "catboost>=1.2.8",
+ "fastapi>=0.100.0",
+ "ipykernel>=7.0.0a1",
+ "lightgbm>=4.6.0",
+ "matplotlib>=3.10.3",
+ "openpyxl>=3.1.5",
+ "optuna>=4.4.0",
+ "pandas>=2.3.1",
+ "pydantic>=2.11.7",
+ "python-multipart>=0.0.6",
+ "scikit-learn>=1.7.1",
+ "seaborn>=0.13.2",
+ "torch>=2.0.0",
+ "uvicorn[standard]>=0.20.0",
+ "xgboost>=3.0.2",
+]
+
+# GPU-enabled versions that leverage pre-installed CUDA
+[project.optional-dependencies]
+gpu = [
+ "torch>=2.0.0",  # Will use CUDA from base image
+ "xgboost>=3.0.2", # GPU support via existing CUDA
+ "catboost>=1.2.8", # GPU support via existing CUDA
+]   

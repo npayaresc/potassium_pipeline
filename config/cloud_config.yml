@@ -1,0 +1,92 @@
+# Cloud-Agnostic Configuration
+# This file contains environment-specific settings that can be overridden
+# by environment variables or cloud-specific configurations
+
+# General Settings
+app:
+  name: "magnesium-pipeline"
+  version: "1.0.0"
+  environment: "production"  # development, staging, production
+  debug: false
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  timeout: 300
+  max_file_size: 100MB
+  cors_origins: ["*"]
+
+# Storage Configuration (Cloud-Agnostic)
+storage:
+  # Local storage (default)
+  type: "local"  # local, gcs, s3, azure
+  
+  # Local paths
+  data_path: "/app/data"
+  models_path: "/app/models"
+  reports_path: "/app/reports"
+  logs_path: "/app/logs"
+  
+  # Cloud storage (when type != local)
+  bucket_name: "mapana-ai-models-magnesium-data"
+  credentials_path: null
+  prefix: "magnesium-pipeline"
+
+# Database Configuration (Optional)
+database:
+  type: null  # postgresql, mysql, sqlite, null
+  host: null
+  port: null
+  name: null
+  username: null
+  password: null
+  connection_pool_size: 5
+
+# Compute Configuration
+compute:
+  gpu_enabled: true
+  gpu_memory_fraction: 0.8
+  cpu_cores: null  # null = auto-detect
+  memory_limit: null  # null = no limit
+
+# Pipeline Configuration
+pipeline:
+  default_strategy: "simple_only"
+  time_limit: 3600
+  enable_gpu: true
+  enable_sample_weights: true
+  
+# Monitoring & Logging
+monitoring:
+  log_level: "INFO"
+  enable_metrics: true
+  metrics_port: 9090
+  health_check_interval: 30
+
+# Security
+security:
+  api_key_required: false
+  api_key: null
+  rate_limiting:
+    enabled: false
+    requests_per_minute: 60
+
+# Cloud Provider Specific Overrides
+cloud_providers:
+  gcp:
+    project_id: "mapana-ai-models"
+    region: "us-central1"
+    storage_class: "STANDARD"
+    compute_zone: "us-central1-a"
+    
+  aws:
+    region: "us-east-1"
+    storage_class: "STANDARD"
+    instance_type: "ml.m5.large"
+    
+  azure:
+    resource_group: null
+    location: "East US"
+    storage_tier: "Standard"

@@ -1,0 +1,74 @@
+# Staging Environment Configuration for Magnesium Pipeline
+# This file demonstrates environment-specific settings
+
+# General Settings
+app:
+  name: "magnesium-pipeline-staging"
+  version: "1.0.0"
+  environment: "staging"
+  debug: true
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  timeout: 600  # Longer timeout for staging/development
+  max_file_size: 500MB
+  cors_origins: ["*"]
+
+# Storage Configuration (Cloud-Agnostic)
+storage:
+  type: "gcs"
+  data_path: "/app/data"
+  models_path: "/app/models"
+  reports_path: "/app/reports"
+  logs_path: "/app/logs"
+  bucket_name: "staging-magnesium-data"
+  credentials_path: null
+  prefix: "magnesium-pipeline-staging"
+
+# Compute Configuration
+compute:
+  gpu_enabled: true
+  gpu_memory_fraction: 0.9  # Use more GPU memory in staging
+  cpu_cores: null
+  memory_limit: null
+
+# Pipeline Configuration
+pipeline:
+  default_strategy: "full_context"  # Faster strategy for staging
+  time_limit: 1800  # 30 minutes for staging tests
+  enable_gpu: true
+  enable_sample_weights: true
+  
+# Monitoring & Logging
+monitoring:
+  log_level: "DEBUG"  # More verbose logging in staging
+  enable_metrics: true
+  metrics_port: 9090
+  health_check_interval: 30
+
+# Security (relaxed for staging)
+security:
+  api_key_required: false
+  rate_limiting:
+    enabled: false
+
+# Cloud Provider Specific Overrides
+cloud_providers:
+  gcp:
+    project_id: "mapana-ai-models"  # TODO: Replace with your actual project ID (not number)
+    region: "us-central1"
+    storage_class: "STANDARD"
+    compute_zone: "us-central1-a"
+    
+  aws:
+    region: "us-east-1"
+    storage_class: "STANDARD_IA"  # Use cheaper storage for staging
+    instance_type: "ml.m5.large"
+    
+  azure:
+    resource_group: "magnesium-staging-rg"
+    location: "East US"
+    storage_tier: "Standard"

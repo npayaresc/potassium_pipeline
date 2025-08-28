@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # API service for serving predictions
+  magnesium-api:
+    build:
+      context: .
+      target: production
+      dockerfile: Dockerfile
+      cache_from:
+        - magnesium-api:latest
+    container_name: magnesium-api
+    ports:
+      - "8000:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - GPU_ENABLED=true
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+      - ./bad_files:/app/bad_files
+      - ./bad_prediction_files:/app/bad_prediction_files
+      - ./config:/app/config:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: ["uv", "run", "--prerelease=allow", "python", "api_server.py"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Development environment
+  magnesium-dev:
+    build:
+      context: .
+      target: development
+      dockerfile: Dockerfile
+      cache_from:
+        - magnesium-dev:latest
+    container_name: magnesium-dev
+    ports:
+      - "8888:8888"
+      - "8001:8000"  # Alternative API port for dev
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - GPU_ENABLED=true
+      - JUPYTER_ENABLE_LAB=yes
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''"]
+    profiles:
+      - dev

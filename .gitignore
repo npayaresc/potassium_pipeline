@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+data/
+bad_files/
+bad_prediction_files/
+catboost_info/
+logs/
+models/
+configs/
+*.zip/
+reports/
+*.log
+pipeline.log
+logs/pipeline.log
+
+# Deployment tracking
+.deployments/

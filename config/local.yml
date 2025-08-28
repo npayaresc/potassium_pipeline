@@ -1,0 +1,50 @@
+# Local Docker Environment Configuration
+
+app:
+  name: "magnesium-pipeline-local"
+  version: "1.0.0"
+  environment: "development"
+  debug: true
+
+# API Configuration for local development
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  timeout: 600  # Longer timeout for training
+  max_file_size: 500MB
+  cors_origins: ["*"]
+
+# Local storage paths (mapped to Docker volumes)
+storage:
+  type: "local"
+  data_path: "/app/data"
+  models_path: "/app/models"
+  reports_path: "/app/reports"
+  logs_path: "/app/logs"
+
+# Compute configuration optimized for local GPU
+compute:
+  gpu_enabled: true
+  gpu_memory_fraction: 1.0  # Use most of GPU memory
+  cpu_cores: null  # Auto-detect
+  memory_limit: null
+
+# Pipeline settings for local development/testing
+pipeline:
+  default_strategy: "simple_only"
+  time_limit: 1800  # 30 minutes for local testing
+  enable_gpu: true
+  enable_sample_weights: true
+
+# Enhanced logging for development
+monitoring:
+  log_level: "DEBUG"
+  enable_metrics: false  # Disable for simplicity
+  health_check_interval: 30
+
+# No security for local development
+security:
+  api_key_required: false
+  rate_limiting:
+    enabled: false

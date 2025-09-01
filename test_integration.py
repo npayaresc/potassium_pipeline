@@ -24,10 +24,10 @@ def test_configuration():
         print(f"  - Components: {config.dimension_reduction.n_components}")
         print(f"  - Parameters: {config.dimension_reduction.get_params()}")
         
-        print(f"✓ AutoGluon dimension reduction: {config.autogluon.use_dimension_reduction}")
-        print(f"  - Method: {config.autogluon.dimension_reduction.method}")
-        print(f"  - Components: {config.autogluon.dimension_reduction.n_components}")
-        print(f"  - Parameters: {config.autogluon.dimension_reduction.get_params()}")
+        print(f"✓ AutoGluon uses global dimension reduction: {config.use_dimension_reduction}")
+        print(f"  - Method: {config.dimension_reduction.method}")
+        print(f"  - Components: {config.dimension_reduction.n_components}")
+        print(f"  - Parameters: {config.dimension_reduction.get_params()}")
         
         return True
     except Exception as e:

@@ -1,0 +1,54 @@
+# Auto-generated configuration for experiment: exp_20250830_185536_766082_phase1_Mg_only_rawtrue_focusedtrue
+# Generated: Sa 30. Aug 18:55:36 WEST 2025
+
+# Feature Engineering
+feature_strategies: ["Mg_only"]
+use_raw_spectral_data: true
+use_focused_magnesium_features: true
+
+# Enhanced Features
+enable_molecular_bands: false
+enable_macro_elements: true
+enable_micro_elements: false
+enable_oxygen_hydrogen: false
+enable_advanced_ratios: true
+enable_spectral_patterns: true
+enable_interference_correction: false
+
+# Dimensionality Reduction
+use_dimension_reduction: false
+dimension_reduction:
+  method: "pca"
+  n_components: 30
+
+# Sample Weighting
+use_sample_weights: true
+sample_weight_method: "distribution_based"
+use_concentration_features: true
+
+# Data Processing
+outlier_method: "SAM"
+outlier_threshold: 0.85
+max_outlier_percentage: 30
+enable_wavelength_standardization: false
+wavelength_interpolation_method: "linear"
+
+# Training Configuration
+models_to_train: [xgboost,lightgbm,catboost]
+cv_folds: 5
+use_gpu: 
+
+# Optimization Settings (for tuning)
+tuner:
+  objective_function_name: "distribution_based"
+  n_trials: 100
+  timeout: 7200
+
+# AutoGluon Settings
+autogluon:
+  presets: ""
+  ag_args_fit:
+    num_bag_folds: 3
+    num_bag_sets: 1
+    num_stack_levels: 0
+  time_limit: 

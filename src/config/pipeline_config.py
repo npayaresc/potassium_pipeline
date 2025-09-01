@@ -364,7 +364,7 @@ class TunerConfig(BaseModel):
     timeout: int = 12000
     n_jobs: int = 8
     #models_to_tune: List[str] = ["random_forest", "xgboost", "lightgbm", "catboost", "svr", "extratrees"]
-    models_to_tune: List[str] = ["catboost"]
+    models_to_tune: List[str] = ["extratrees"]
     # Use this to select the tuning goal.
     objective_function_name: Literal[
         'r2', 'robust', 'concentration_weighted', 'mape_focused',
@@ -408,29 +408,21 @@ class AutoGluonConfig(BaseModel):
     # Sample weighting configuration - NOW ENABLED (from best run but with sample weights)
     weight_method: Literal['legacy', 'improved'] = 'improved'
     
-    # Dimensionality reduction for AutoGluon
-    # use_dimension_reduction: bool = True  # Enable dimensionality reduction
-    # dimension_reduction: DimensionReductionConfig = DimensionReductionConfig(
-    #     method='pca',
-    #     n_components=0.97,  # Slightly more components for ensemble learning
-        
-    # )
-    
-    time_limit: int = 13800  # From best AutoGluon run (R² = 0.6035)
-    presets: str = 'best_quality'  # From best AutoGluon run configuration
+    time_limit: int = 10800  # 3 hours for thorough optimization
+    presets: str = 'good_quality'  # From best AutoGluon run configuration
     
     # GPU-safe preset switching - automatically use good_quality when GPU is enabled
-    gpu_safe_preset: str = 'best_quality'  # Fallback preset for GPU compatibility that allows custom hyperparameters
+    gpu_safe_preset: str = 'good_quality'  # Fallback preset for GP
     model_subdirectory: str = "autogluon"
     num_trials: int = 100  # Increased trials for better hyperparameter search
     
-    # Optimized training arguments from best AutoGluon run (R² = 0.6035)
+    # Optimized training arguments - ENABLED STACKING for better performance
     ag_args_fit: Dict[str, Any] = {
-        'num_bag_folds': 3,      # From best run configuration
-        'num_bag_sets': 1,       # From best run configuration  
-        'num_stack_levels': 0,   # From best run configuration - NO STACKING (critical for best performance)
-        'auto_stack': False,     # Disable AutoGluon's automatic stacking decisions
-        'dynamic_stacking': False,  # Disable dynamic stacking override
+        'num_bag_folds': 5,      # Increased for better cross-validation
+        'num_bag_sets': 2,       # Increased for more diverse models  
+        'num_stack_levels': 2,   # ENABLE STACKING - critical for R² > 0.75
+        'auto_stack': True,      # Enable AutoGluon's automatic stacking decisions
+        'dynamic_stacking': True,  # Enable dynamic stacking override
         #'num_gpus': 0,          # GPU usage
     }
     ag_args_ensemble: Dict[str, Any] = {
@@ -450,6 +442,9 @@ class AutoGluonConfig(BaseModel):
         'GBM': [
             
             # LightGBM - more aggressive configurations (GPU settings added automatically by autogluon_trainer.py)
+            {'num_boost_round': 1500, 'learning_rate': 0.01, 'num_leaves': 63, 'min_data_in_leaf': 2, 'feature_fraction': 0.9, 'bagging_fraction': 0.9, 'bagging_freq': 1},
+            {'num_boost_round': 1000, 'learning_rate': 0.02, 'num_leaves': 31, 'min_data_in_leaf': 3, 'feature_fraction': 0.8, 'lambda_l1': 0.1, 'lambda_l2': 0.1},
+            {'num_boost_round': 500, 'learning_rate': 0.03, 'num_leaves': 127, 'min_data_in_leaf': 1, 'feature_fraction': 0.7, 'extra_trees': True},
             {'num_boost_round': 200, 'learning_rate': 0.05, 'num_leaves': 31, 'min_data_in_leaf': 5},
             {'num_boost_round': 100, 'learning_rate': 0.1, 'num_leaves': 15, 'min_data_in_leaf': 8},
             #{'num_boost_round': 1000, 'learning_rate': 0.02, 'num_leaves': 31, 'feature_fraction': 0.9, 'min_data_in_leaf': 2, 'reg_alpha': 0.1, 'reg_lambda': 0.1},
@@ -481,10 +476,11 @@ class AutoGluonConfig(BaseModel):
             {'n_estimators': 200, 'max_features': 0.6, 'max_depth': 15, 'min_samples_leaf': 3, 'min_samples_split': 8},
         ],
         'NN_TORCH': [
-            # Neural networks - more capacity and training
+            # Neural networks - optimized for spectral data with proper regularization
+            {'num_epochs': 500, 'learning_rate': 0.0003, 'activation': 'elu', 'dropout_prob': 0.2, 'weight_decay': 0.01},
+            {'num_epochs': 400, 'learning_rate': 0.0005, 'activation': 'relu', 'dropout_prob': 0.3, 'weight_decay': 0.005},
+            {'num_epochs': 300, 'learning_rate': 0.001, 'activation': 'leaky_relu', 'dropout_prob': 0.4, 'weight_decay': 0.001},
             {'num_epochs': 200, 'learning_rate': 0.001, 'dropout_prob': 0.3, 'weight_decay': 0.01},
-            {'num_epochs': 150, 'learning_rate': 0.005, 'dropout_prob': 0.2, 'weight_decay': 0.001},
-            {'num_epochs': 100, 'learning_rate': 0.01, 'dropout_prob': 0.4, 'weight_decay': 0.0001},
         ],
         'LR': [
             # Linear models - use sklearn-compatible parameters
@@ -553,15 +549,15 @@ class Config(BaseModel):
     _reference_data_path: str
     
     # --- Data Management ---
-    target_column: str = "Magnesium dm %"
+    target_column: str = "Magnesium %"
     sample_id_column: str = "Sample ID"
     exclude_pot_samples: bool = False
     test_split_size: float = 0.20
     max_samples: Optional[int] = None
     
     # ADDED: Configuration for target value filtering - focused on 0.2-0.5 range
-    target_value_min: Optional[float] = 0.10  # Focus closer to target range for better 0.2-0.5 performance
-    target_value_max: Optional[float] = 0.52  # Focus closer to target range for better 0.2-0.5 performance
+    target_value_min: Optional[float] = 0 # Focus closer to target range for better 0.2-0.5 performance
+    target_value_max: Optional[float] = 1.0  # Focus closer to target range for better 0.2-0.5 performance
     
     # Custom validation set directory - if provided, will process raw files from this directory for validation
     #custom_validation_dir: Optional[str] = "/home/payanico/magnesium_pipeline/data/raw/combo_6_8"
@@ -572,10 +568,10 @@ class Config(BaseModel):
     wavelength_interpolation_method: Literal['linear', 'cubic', 'nearest'] = 'linear'
     wavelength_resolution: float = 0.1  # nm resolution for standardized grid
 
-    # Outlier detection settings from BEST AutoGluon run (R² = 0.6035)
+    # Outlier detection settings - RELAXED for more training data
     outlier_method: str = 'SAM'
-    outlier_threshold: float = 0.95          # From best run (was 0.90) - MORE STRICT
-    max_outlier_percentage: float = 50.0     # From best run (was 70.0) - LESS REMOVAL
+    outlier_threshold: float = 0.85          # More lenient to keep borderline samples
+    max_outlier_percentage: float = 30.0     # Limit removal to preserve training data
     
     # Alternative options (not used in best run):
     # outlier_threshold: float = 0.85          # 85% similarity threshold  
@@ -589,14 +585,14 @@ class Config(BaseModel):
         return v.upper()
 
     magnesium_region: PeakRegion = PeakRegion(
-        element="P_I", lower_wavelength=653.5, upper_wavelength=656.5, center_wavelengths=[654.5])
+        element="M_I", lower_wavelength=515.77, upper_wavelength=517.77, center_wavelengths=[516.77])
     
     
     context_regions: List[PeakRegion] = [
         PeakRegion(element="C_I", lower_wavelength=832.5, upper_wavelength=834.5, center_wavelengths=[833.5]),
         PeakRegion(element="CA_I_help", lower_wavelength=525.1, upper_wavelength=527.1, center_wavelengths=[526.1]),
         PeakRegion(element="N_I_help", lower_wavelength=741.0, upper_wavelength=743.0, center_wavelengths=[742.0]),
-        PeakRegion(element="P_I_secondary", lower_wavelength=774.5, upper_wavelength=776.5, center_wavelengths=[775.5]),
+        PeakRegion(element="Mg_secondary", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[280.3]),
         #PeakRegion(element="P_I_secondary", lower_wavelength=653.5, upper_wavelength=656.5, center_wavelengths=[654.5]),
         PeakRegion(element="K_I_help", lower_wavelength=768.79, upper_wavelength=770.79, center_wavelengths=[769.79]),
     ]
@@ -614,8 +610,9 @@ class Config(BaseModel):
     macro_elements: List[PeakRegion] = [
         PeakRegion(element="S_I", lower_wavelength=834.5, upper_wavelength=836.5, center_wavelengths=[835.5]),
         PeakRegion(element="S_I_2", lower_wavelength=868.0, upper_wavelength=870.0, center_wavelengths=[869.0]),
-        PeakRegion(element="Mg_I", lower_wavelength=515.7, upper_wavelength=517.7, center_wavelengths=[516.7]),
-        PeakRegion(element="Mg_II", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[280.3]),
+        PeakRegion(element="P_I", lower_wavelength=653.56, upper_wavelength=655.56, center_wavelengths=[654.56]),
+        #PeakRegion(element="Mg_I", lower_wavelength=515.7, upper_wavelength=517.7, center_wavelengths=[516.7]),
+        #PeakRegion(element="Mg_II", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[280.3]),
     ]
     
     # Micro elements
@@ -637,14 +634,14 @@ class Config(BaseModel):
         PeakRegion(element="H_beta", lower_wavelength=485.0, upper_wavelength=487.0, center_wavelengths=[486.1]),
     ]
     
-    # Feature configuration flags
-    enable_molecular_bands: bool = False  # CN/NH/NO bands - not directly relevant for P
-    enable_macro_elements: bool = True    # S, Mg, Ca, K - important for P availability
-    enable_micro_elements: bool = False   # Fe, Mn, B, Zn - disabled for now
-    enable_oxygen_hydrogen: bool = False  # Not directly relevant for P
-    enable_advanced_ratios: bool = False   # P/N, P/K, P/S ratios are critical
-    enable_spectral_patterns: bool = False # Peak shapes can help identify P compounds
-    enable_interference_correction: bool = False  # Only if Fe interference is an issue
+    # Feature configuration flags - OPTIMIZED FOR MAGNESIUM
+    enable_molecular_bands: bool = False   # CN/NH/NO bands can indicate organic matter affecting Mg
+    enable_macro_elements: bool = True    # S, Mg, Ca, K - critical for Mg interactions
+    enable_micro_elements: bool = False    # Fe, Mn, B, Zn - compete with Mg uptake
+    enable_oxygen_hydrogen: bool = False   # H/O ratios affect Mg compounds
+    enable_advanced_ratios: bool = True   # Mg/Ca, Mg/K ratios are critical
+    enable_spectral_patterns: bool = True # Peak shapes help identify Mg compounds
+    enable_interference_correction: bool = False  # Fe/Mn can interfere with Mg lines
     enable_plasma_indicators: bool = False  # Not needed for concentration prediction
     
     # Magnesium feature generation method
@@ -679,7 +676,7 @@ class Config(BaseModel):
     #     "ridge", "lasso", "random_forest", "gradient_boost", "xgboost",
     #     "lightgbm", "catboost", "svr", "extratrees", "neural_network", "neural_network_light"
     # ]
-    models_to_train: List[str] = ["random_forest"]
+    models_to_train: List[str] = [ "extratrees"]
     
     
     # Usage in pipeline_config.py:
@@ -716,7 +713,7 @@ class Config(BaseModel):
     #         'epochs': 200  # Reduce epochs for faster component search
     #     }
     # )
-    # Dimensionality reduction configuration for standard models  
+    # Dimensionality reduction configuration (applies to both standard models and AutoGluon)
     use_dimension_reduction: bool = False
     # dimension_reduction: DimensionReductionConfig = DimensionReductionConfig(
     #     method='pls',
@@ -724,8 +721,10 @@ class Config(BaseModel):
     #     pls_params={'scale': True, 'max_iter': 500}
     #)
     dimension_reduction: DimensionReductionConfig = DimensionReductionConfig(
-        method='pca',
-        n_components=0.97,  # VAE requires integer for latent dimension
+        method='pls',
+        n_components=30,
+        pls_params={'scale': True, 'max_iter': 3000},
+        #n_components=0.97,  # VAE requires integer for latent dimension
         # Uncomment to override default vae_params:
         # vae_params={
         #     'hidden_layers': [128, 64],

@@ -66,27 +66,36 @@ class AdvancedRatioCalculator:
             return np.clip(num / den, -100, 100)  # Clip to prevent extreme values
         
         # Get peak intensities (assuming peak_0 is the primary peak)
-        p_intensity = features.get('P_I_peak_0', np.nan)
-        p_secondary_intensity = features.get('P_I_secondary_peak_0', np.nan)
+        mg_intensity = features.get('M_I_peak_0', np.nan)  # Primary Mg line at 516.77nm
+        mg_secondary_intensity = features.get('Mg_secondary_peak_0', np.nan)  # Secondary at 280.3nm
         k_intensity = features.get('K_I_help_peak_0', np.nan)
         s_intensity = features.get('S_I_peak_0', np.nan)
         ca_intensity = features.get('CA_I_help_peak_0', np.nan)
-        mg_intensity = features.get('Mg_I_peak_0', np.nan)
+        p_intensity = features.get('P_I_peak_0', np.nan)
+        n_intensity = features.get('N_I_help_peak_0', np.nan)
         
-        # Primary nutrient ratios
-        ratios['P_N_ratio'] = safe_ratio(p_intensity, features.get('N_I_help_peak_0', np.nan), 'P/N')
-        ratios['P_K_ratio'] = safe_ratio(p_intensity, k_intensity, 'P/K')
-        ratios['P_S_ratio'] = safe_ratio(p_intensity, s_intensity, 'P/S')
+        # Critical cation competition ratios for Mg uptake
+        ratios['K_Mg_ratio'] = safe_ratio(k_intensity, mg_intensity, 'K/Mg')  # Ideal: 3-5
+        ratios['Ca_Mg_ratio'] = safe_ratio(ca_intensity, mg_intensity, 'Ca/Mg')  # Ideal: 3-7
+        ratios['Mg_K_ratio'] = safe_ratio(mg_intensity, k_intensity, 'Mg/K')  # Inverse for modeling
+        ratios['Mg_Ca_ratio'] = safe_ratio(mg_intensity, ca_intensity, 'Mg/Ca')  # Inverse
         
-        # Complex nutrient balance indicators
-        pn_sum = p_intensity + features.get('N_I_help_peak_0', np.nan) if not (np.isnan(p_intensity) or np.isnan(features.get('N_I_help_peak_0', np.nan))) else np.nan
+        # Combined cation antagonism - critical for Mg availability
         kca_sum = k_intensity + ca_intensity if not (np.isnan(k_intensity) or np.isnan(ca_intensity)) else np.nan
-        ratios['PN_KCa_ratio'] = safe_ratio(pn_sum, kca_sum, 'PN/KCa')
+        ratios['KCa_Mg_ratio'] = safe_ratio(kca_sum, mg_intensity, '(K+Ca)/Mg')  # Total antagonism
+        ratios['Mg_KCa_ratio'] = safe_ratio(mg_intensity, kca_sum, 'Mg/(K+Ca)')  # Mg competitiveness
         
-        # Cation ratios
-        ratios['K_Ca_ratio'] = safe_ratio(k_intensity, ca_intensity, 'K/Ca')
-        ratios['K_Mg_ratio'] = safe_ratio(k_intensity, mg_intensity, 'K/Mg')
-        ratios['Ca_Mg_ratio'] = safe_ratio(ca_intensity, mg_intensity, 'Ca/Mg')
+        # Nutrient balance ratios
+        ratios['Mg_N_ratio'] = safe_ratio(mg_intensity, n_intensity, 'Mg/N')
+        ratios['Mg_P_ratio'] = safe_ratio(mg_intensity, p_intensity, 'Mg/P')  # Synergistic
+        ratios['Mg_S_ratio'] = safe_ratio(mg_intensity, s_intensity, 'Mg/S')
+        
+        # Secondary Mg line ratios (plasma diagnostics)
+        ratios['Mg_primary_secondary_ratio'] = safe_ratio(mg_intensity, mg_secondary_intensity, 'Mg516/Mg280')
+        
+        # Base saturation indicator
+        total_bases = mg_intensity + k_intensity + ca_intensity if not any(np.isnan([mg_intensity, k_intensity, ca_intensity])) else np.nan
+        ratios['Mg_base_fraction'] = safe_ratio(mg_intensity, total_bases, 'Mg/TotalBases')
         
         # Log-transformed ratios for non-linear relationships
         for key, value in list(ratios.items()):
@@ -288,8 +297,8 @@ class EnhancedSpectralFeatures(BaseEstimator, TransformerMixin):
         
         # 3. Spectral patterns
         if self.config.enable_spectral_patterns:
-            # FWHM for key lines
-            for element in ['P_I', 'C_I', 'N_I_help', 'K_I_help']:
+            # FWHM for key lines - focus on Mg and competing cations
+            for element in ['M_I', 'Mg_secondary', 'CA_I_help', 'K_I_help', 'P_I']:
                 peak_wl = self._get_peak_wavelength(element)
                 if peak_wl:
                     fwhm_features = self.pattern_analyzer.calculate_peak_fwhm(
@@ -297,8 +306,13 @@ class EnhancedSpectralFeatures(BaseEstimator, TransformerMixin):
                     enhanced_features[f'{element}_fwhm'] = fwhm_features['fwhm']
                     enhanced_features[f'{element}_asymmetry'] = fwhm_features['asymmetry']
             
-            # Continuum level
-            line_free_regions = [(750, 755), (820, 825)]  # Example regions
+            # Continuum level - using regions typically free of emission lines in plant LIBS
+            # These regions avoid major elemental lines while capturing baseline
+            line_free_regions = [
+                (720, 725),  # Between K lines and molecular bands
+                (790, 795),  # Between O lines
+                (810, 815),  # Before C and S lines
+            ]
             enhanced_features['continuum_level'] = self.pattern_analyzer.calculate_continuum_level(
                 wavelengths, intensities, line_free_regions)
         
@@ -307,12 +321,19 @@ class EnhancedSpectralFeatures(BaseEstimator, TransformerMixin):
             fe_features = self.interference_corrector.detect_fe_interference(wavelengths, intensities)
             enhanced_features.update(fe_features)
             
-            # Self-absorption for strong lines
-            p_intensity = X_features.get('P_I_peak_0', np.nan)
-            p_area = X_features.get('P_I_simple_peak_area', np.nan)
-            p_fwhm = enhanced_features.get('P_I_fwhm', np.nan)
-            enhanced_features['P_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
-                p_intensity, p_area, p_fwhm)
+            # Self-absorption for strong Mg lines (important at high concentrations)
+            mg_intensity = X_features.get('M_I_peak_0', np.nan)
+            mg_area = X_features.get('M_I_simple_peak_area', np.nan)
+            mg_fwhm = enhanced_features.get('M_I_fwhm', np.nan)
+            enhanced_features['Mg_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
+                mg_intensity, mg_area, mg_fwhm)
+            
+            # Also check secondary Mg line for self-absorption
+            mg2_intensity = X_features.get('Mg_secondary_peak_0', np.nan)
+            mg2_area = X_features.get('Mg_secondary_simple_peak_area', np.nan)
+            mg2_fwhm = enhanced_features.get('Mg_secondary_fwhm', np.nan)
+            enhanced_features['Mg_secondary_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
+                mg2_intensity, mg2_area, mg2_fwhm)
         
         # 5. Plasma indicators
         if self.config.enable_plasma_indicators:

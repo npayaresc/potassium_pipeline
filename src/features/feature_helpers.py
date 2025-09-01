@@ -76,54 +76,54 @@ def generate_high_magnesium_features(df: pd.DataFrame, simple_feature_names: Lis
     enhanced_feature_names = []
     
     # Apply reasonable bounds to PC_ratio to prevent extreme values
-    pc_ratio_safe = df_out['P_C_ratio'].fillna(0.0)
+    mc_ratio_safe = df_out['M_C_ratio'].fillna(0.0)
     # Clip PC_ratio to reasonable bounds (e.g., -50 to 50) to prevent corruption
-    pc_ratio_clipped = np.clip(pc_ratio_safe, -50.0, 50.0)
+    mc_ratio_clipped = np.clip(mc_ratio_safe, -50.0, 50.0)
     
-    enhanced_features['PC_ratio_squared'] = pc_ratio_clipped ** 2
-    enhanced_feature_names.append('PC_ratio_squared')
-    enhanced_features['PC_ratio_cubic'] = pc_ratio_clipped ** 3
-    enhanced_feature_names.append('PC_ratio_cubic')
-    enhanced_features['PC_ratio_log'] = np.log1p(np.abs(pc_ratio_clipped))
-    enhanced_feature_names.append('PC_ratio_log')
+    enhanced_features['MC_ratio_squared'] = mc_ratio_clipped ** 2
+    enhanced_feature_names.append('MC_ratio_squared')
+    enhanced_features['MC_ratio_cubic'] = mc_ratio_clipped ** 3
+    enhanced_feature_names.append('MC_ratio_cubic')
+    enhanced_features['MC_ratio_log'] = np.log1p(np.abs(mc_ratio_clipped))
+    enhanced_feature_names.append('MC_ratio_log')
     
-    p_height_col, c_height_col = 'P_I_simple_peak_height', 'C_I_simple_peak_height'
-    if p_height_col in df_out.columns and c_height_col in df_out.columns:
+    m_height_col, c_height_col = 'M_I_simple_peak_height', 'C_I_simple_peak_height'
+    if m_height_col in df_out.columns and c_height_col in df_out.columns:
         c_heights_safe = df_out[c_height_col].replace(0, 1e-6).fillna(1e-6)
-        height_ratio = df_out[p_height_col].fillna(0) / c_heights_safe
-        enhanced_features['PC_height_ratio'] = height_ratio
-        enhanced_feature_names.append('PC_height_ratio')
-        enhanced_features['PC_height_ratio_squared'] = height_ratio ** 2
-        enhanced_feature_names.append('PC_height_ratio_squared')
+        height_ratio = df_out[m_height_col].fillna(0) / c_heights_safe
+        enhanced_features['MC_height_ratio'] = height_ratio
+        enhanced_feature_names.append('MC_height_ratio')
+        enhanced_features['MC_height_ratio_squared'] = height_ratio ** 2
+        enhanced_feature_names.append('MC_height_ratio_squared')
 
-    p_base_col, p_total_col = 'P_I_simple_baseline_avg', 'P_I_simple_total_intensity'
-    if p_base_col in df_out.columns and p_total_col in df_out.columns:
-        base_safe = df_out[p_base_col].replace(0, 1e-6).fillna(1e-6)
-        sbr = df_out[p_total_col].fillna(0) / base_safe
-        enhanced_features['P_signal_baseline_ratio'] = sbr
-        enhanced_feature_names.append('P_signal_baseline_ratio')
-        enhanced_features['P_signal_baseline_log'] = np.log1p(np.abs(sbr))
-        enhanced_feature_names.append('P_signal_baseline_log')
+    m_base_col, m_total_col = 'M_I_simple_baseline_avg', 'M_I_simple_total_intensity'
+    if m_base_col in df_out.columns and m_total_col in df_out.columns:
+        base_safe = df_out[m_base_col].replace(0, 1e-6).fillna(1e-6)
+        sbr = df_out[m_total_col].fillna(0) / base_safe
+        enhanced_features['M_signal_baseline_ratio'] = sbr
+        enhanced_feature_names.append('M_signal_baseline_ratio')
+        enhanced_features['M_signal_baseline_log'] = np.log1p(np.abs(sbr))
+        enhanced_feature_names.append('M_signal_baseline_log')
 
-    p_area_col = 'P_I_simple_peak_area'
-    if p_area_col in df_out.columns:
-        p_area_safe = df_out[p_area_col].fillna(0)
-        p_75th = np.percentile(p_area_safe[p_area_safe > 0], 75) if np.any(p_area_safe > 0) else 0
-        p_90th = np.percentile(p_area_safe[p_area_safe > 0], 90) if np.any(p_area_safe > 0) else 0
+    m_area_col = 'M_I_simple_peak_area'
+    if m_area_col in df_out.columns:
+        m_area_safe = df_out[m_area_col].fillna(0)
+        m_75th = np.percentile(m_area_safe[m_area_safe > 0], 75) if np.any(m_area_safe > 0) else 0
+        m_90th = np.percentile(m_area_safe[m_area_safe > 0], 90) if np.any(m_area_safe > 0) else 0
         
-        enhanced_features['high_P_indicator'] = 1 / (1 + np.exp(-(p_area_safe - p_75th) / (p_75th + 1e-6)))
-        enhanced_feature_names.append('high_P_indicator')
-        enhanced_features['very_high_P_indicator'] = 1 / (1 + np.exp(-(p_area_safe - p_90th) / (p_90th + 1e-6)))
-        enhanced_feature_names.append('very_high_P_indicator')
+        enhanced_features['high_M_indicator'] = 1 / (1 + np.exp(-(m_area_safe - m_75th) / (m_75th + 1e-6)))
+        enhanced_feature_names.append('high_M_indicator')
+        enhanced_features['very_high_M_indicator'] = 1 / (1 + np.exp(-(m_area_safe - m_90th) / (m_90th + 1e-6)))
+        enhanced_feature_names.append('very_high_M_indicator')
         
-    other_elements = set(name.split('_simple')[0] for name in simple_feature_names if '_simple_' in name and 'P_I' not in name and 'C_I' not in name)
+    other_elements = set(name.split('_simple')[0] for name in simple_feature_names if '_simple_' in name and 'M_I' not in name and 'C_I' not in name)
     for element in list(other_elements)[:2]:
         element_area_col = f'{element}_simple_peak_area'
-        if element_area_col in df_out.columns and p_area_col in df_out.columns:
+        if element_area_col in df_out.columns and m_area_col in df_out.columns:
             element_safe = df_out[element_area_col].replace(0, 1e-6).fillna(1e-6)
-            ratio = df_out[p_area_col].fillna(0) / element_safe
-            enhanced_features[f'P_{element}_ratio'] = ratio
-            enhanced_feature_names.append(f'P_{element}_ratio')
+            ratio = df_out[m_area_col].fillna(0) / element_safe
+            enhanced_features[f'M_{element}_ratio'] = ratio
+            enhanced_feature_names.append(f'M_{element}_ratio')
 
     logger.info(f"Generated {len(enhanced_feature_names)} high-magnesium features.")
     return pd.concat([df_out, enhanced_features], axis=1), enhanced_feature_names
@@ -137,46 +137,46 @@ def generate_focused_magnesium_features(df: pd.DataFrame, simple_feature_names: 
     enhanced_features = pd.DataFrame(index=df_out.index)
     enhanced_feature_names = []
     
-    # P/C ratio transformations - fundamental for magnesium analysis
-    if 'P_C_ratio' in df_out.columns:
-        pc_ratio_safe = df_out['P_C_ratio'].fillna(0.0)
-        pc_ratio_clipped = np.clip(pc_ratio_safe, -50.0, 50.0)
+    # M/C ratio transformations - fundamental for magnesium analysis
+    if 'M_C_ratio' in df_out.columns:
+        mc_ratio_safe = df_out['M_C_ratio'].fillna(0.0)
+        mc_ratio_clipped = np.clip(mc_ratio_safe, -50.0, 50.0)
         
         # Non-linear transformations capture complex P-C relationships
-        enhanced_features['PC_ratio_squared'] = pc_ratio_clipped ** 2
-        enhanced_feature_names.append('PC_ratio_squared')
-        enhanced_features['PC_ratio_log'] = np.log1p(np.abs(pc_ratio_clipped))
-        enhanced_feature_names.append('PC_ratio_log')
+        enhanced_features['MC_ratio_squared'] = mc_ratio_clipped ** 2
+        enhanced_feature_names.append('MC_ratio_squared')
+        enhanced_features['MC_ratio_log'] = np.log1p(np.abs(mc_ratio_clipped))
+        enhanced_feature_names.append('MC_ratio_log')
     
-    # P/C peak height ratio - important for spectral line intensity comparisons
-    p_height_col, c_height_col = 'P_I_simple_peak_height', 'C_I_simple_peak_height'
-    if p_height_col in df_out.columns and c_height_col in df_out.columns:
+    # M/C peak height ratio - important for spectral line intensity comparisons
+    m_height_col, c_height_col = 'M_I_simple_peak_height', 'C_I_simple_peak_height'
+    if m_height_col in df_out.columns and c_height_col in df_out.columns:
         c_heights_safe = df_out[c_height_col].replace(0, 1e-6).fillna(1e-6)
-        height_ratio = df_out[p_height_col].fillna(0) / c_heights_safe
-        enhanced_features['PC_height_ratio'] = height_ratio
-        enhanced_feature_names.append('PC_height_ratio')
+        height_ratio = df_out[m_height_col].fillna(0) / c_heights_safe
+        enhanced_features['MC_height_ratio'] = height_ratio
+        enhanced_feature_names.append('MC_height_ratio')
     
     # Signal-to-baseline ratio for magnesium - indicates spectral quality
-    p_base_col, p_total_col = 'P_I_simple_baseline_avg', 'P_I_simple_total_intensity'
-    if p_base_col in df_out.columns and p_total_col in df_out.columns:
-        base_safe = df_out[p_base_col].replace(0, 1e-6).fillna(1e-6)
-        sbr = df_out[p_total_col].fillna(0) / base_safe
-        enhanced_features['P_signal_baseline_ratio'] = sbr
-        enhanced_feature_names.append('P_signal_baseline_ratio')
+    m_base_col, m_total_col = 'M_I_simple_baseline_avg', 'M_I_simple_total_intensity'
+    if m_base_col in df_out.columns and m_total_col in df_out.columns:
+        base_safe = df_out[m_base_col].replace(0, 1e-6).fillna(1e-6)
+        sbr = df_out[m_total_col].fillna(0) / base_safe
+        enhanced_features['M_signal_baseline_ratio'] = sbr
+        enhanced_feature_names.append('M_signal_baseline_ratio')
     
     # P ratio to key interfering/related elements (N, K, Ca) using simple peak areas
-    p_area_col = 'P_I_simple_peak_area'
+    m_area_col = 'M_I_simple_peak_area'
     key_elements = ['N_I_help', 'K_I_help', 'CA_I_help']  # Elements that can interfere with P detection
     
-    if p_area_col in df_out.columns:
+    if m_area_col in df_out.columns:
         for element in key_elements:
             element_area_col = f'{element}_simple_peak_area'
             if element_area_col in df_out.columns:
                 element_safe = df_out[element_area_col].replace(0, 1e-6).fillna(1e-6)
-                ratio = df_out[p_area_col].fillna(0) / element_safe
+                ratio = df_out[m_area_col].fillna(0) / element_safe
                 # Use 'area_ratio' suffix to distinguish from peak intensity ratios
-                enhanced_features[f'P_{element.split("_")[0]}_area_ratio'] = ratio
-                enhanced_feature_names.append(f'P_{element.split("_")[0]}_area_ratio')
+                enhanced_features[f'M_{element.split("_")[0]}_area_ratio'] = ratio
+                enhanced_feature_names.append(f'M_{element.split("_")[0]}_area_ratio')
     
     logger.info(f"Generated {len(enhanced_feature_names)} focused magnesium features.")
     return pd.concat([df_out, enhanced_features], axis=1), enhanced_feature_names

@@ -405,6 +405,7 @@ def run_training_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False,
 def run_autogluon_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False,
                            validation_dir: Optional[str] = None,
                            config_path: Optional[str] = None,
+                           strategy: Optional[str] = None,
                            use_parallel: bool = False,
                            n_jobs: int = -1,
                            use_data_parallel: bool = False,
@@ -445,11 +446,16 @@ def run_autogluon_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False
         # Create train/test splits like the standard pipeline
         train_df, test_df = DataManager(cfg).create_reproducible_splits(full_dataset)
     
-    # Use raw-spectral mode if enabled, otherwise use configured strategies
+    # Use raw-spectral mode if enabled, otherwise use configured or command line strategies
     if cfg.use_raw_spectral_data:
         strategy_for_autogluon = "raw-spectral"
         display_strategy = get_display_strategy_name(strategy_for_autogluon, cfg.use_raw_spectral_data)
         logger.info(f"Using raw-spectral mode for AutoGluon (bypassing traditional strategies).")
+    elif strategy:
+        # Use strategy from command line parameter
+        strategy_for_autogluon = strategy
+        display_strategy = get_display_strategy_name(strategy_for_autogluon, cfg.use_raw_spectral_data)
+        logger.info(f"Using feature strategy '{display_strategy}' from command line for AutoGluon.")
     elif cfg.feature_strategies:
         strategy_for_autogluon = cfg.feature_strategies[0]
         display_strategy = get_display_strategy_name(strategy_for_autogluon, cfg.use_raw_spectral_data)
@@ -976,7 +982,7 @@ def run_model_optimization_pipeline(model_names: list, use_gpu: bool = False, us
 def run_range_specialist_pipeline(use_gpu: bool = False, validation_dir: Optional[str] = None,
                                  config_path: Optional[str] = None, strategy: str = "simple_only",
                                  n_trials: Optional[int] = None, timeout: int = 7200, use_pca: bool = False):
-    """Executes the Range Specialist Neural Network optimization for 0.2-0.5% magnesium range."""
+    """Executes the Range Specialist Neural Network optimization for 0.2-0.5%% magnesium range."""
     cfg = setup_pipeline_config(use_gpu, validation_dir, config_path)
     
     # Use config values when command line values are not provided
@@ -1266,7 +1272,10 @@ def main():
     parser_train.add_argument("--strategy", type=str, 
                              choices=["full_context", "simple_only", "Mg_only"],
                              help="Feature strategy to use (default: use strategies from config)")
-    subparsers.add_parser("autogluon", parents=[parent_parser], help="Run the AutoGluon training pipeline.")
+    parser_autogluon = subparsers.add_parser("autogluon", parents=[parent_parser], help="Run the AutoGluon training pipeline.")
+    parser_autogluon.add_argument("--strategy", type=str, 
+                                 choices=["full_context", "simple_only", "Mg_only"],
+                                 help="Feature strategy to use (default: use strategies from config)")
     # Tune subparser with models selection
     parser_tune = subparsers.add_parser("tune", parents=[parent_parser], help="Run hyperparameter tuning for standard models.")
     parser_tune.add_argument("--models", nargs="+", 
@@ -1301,7 +1310,7 @@ def main():
     parser_optimize_models.add_argument("--timeout", type=int, default=None, help="Timeout in seconds per model (default from config)")
 
     # Range Specialist Neural Network Optimization subparser
-    parser_range_specialist = subparsers.add_parser("optimize-range-specialist", parents=[parent_parser], help="Optimize neural network for 0.2-0.5% magnesium range (target R² > 0.5)")
+    parser_range_specialist = subparsers.add_parser("optimize-range-specialist", parents=[parent_parser], help="Optimize neural network for 0.2-0.5%% magnesium range (target R² > 0.5)")
     parser_range_specialist.add_argument("--strategy", type=str, default="simple_only", 
                                        choices=["full_context", "simple_only", "Mg_only"],
                                        help="Feature strategy to use")
@@ -1364,7 +1373,8 @@ def main():
             strategy = getattr(args, 'strategy', None)
             run_training_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, models=models, strategy=strategy, use_parallel=use_parallel, n_jobs=n_jobs, use_data_parallel=use_data_parallel, data_n_jobs=data_n_jobs)
         elif args.stage == "autogluon":
-            run_autogluon_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, use_parallel=use_parallel, n_jobs=n_jobs, use_data_parallel=use_data_parallel, data_n_jobs=data_n_jobs)
+            strategy = getattr(args, 'strategy', None)
+            run_autogluon_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, strategy=strategy, use_parallel=use_parallel, n_jobs=n_jobs, use_data_parallel=use_data_parallel, data_n_jobs=data_n_jobs)
         elif args.stage == "tune":
             models = getattr(args, 'models', None)
             run_tuning_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, models=models)

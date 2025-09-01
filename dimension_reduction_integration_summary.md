@@ -27,20 +27,12 @@ The modular dimension reduction system has been **fully integrated** across all 
 Your pipeline is now configured with:
 
 ```python
-# Standard models
+# Global dimension reduction configuration (applies to both standard models and AutoGluon)
 use_dimension_reduction: bool = True
 dimension_reduction: DimensionReductionConfig(
     method='pls',           # Supervised, target-aware
-    n_components=8,         # 512/8 = 64:1 sample-to-feature ratio  
-    pls_params={'scale': True, 'max_iter': 500}
-)
-
-# AutoGluon models
-autogluon.use_dimension_reduction: bool = True
-autogluon.dimension_reduction: DimensionReductionConfig(
-    method='pls',
-    n_components=10,        # 512/10 = 51:1 sample-to-feature ratio
-    pls_params={'scale': True, 'max_iter': 500}
+    n_components=0.97,      # Explained variance ratio for automatic component selection
+    pls_params={'scale': True, 'max_iter': 1000}
 )
 ```
 

@@ -92,7 +92,7 @@ try:
 except Exception as e:
     # If we can't load Python config, return empty (will use bash defaults as last resort)
     pass
-" 2>/dev/null)
+" 2>/dev/null | grep -E '^PYTHON_')
         
         if [ -n "$python_defaults" ]; then
             eval "$python_defaults"

@@ -132,29 +132,29 @@ class MinimalConcentrationFeatures(BaseEstimator, TransformerMixin):
         X_df = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X.copy()
         
         # Extract magnesium intensity estimate (best available proxy)
-        p_intensity = self._extract_p_intensity_proxy(X_df)
+        m_intensity = self._extract_m_intensity_proxy(X_df)
         
         # Normalize p_intensity to a 0-1 scale based on fitted statistics
         if self.p_intensity_percentiles_ is not None:
-            p_min = self.p_intensity_percentiles_['values'][0]
-            p_max = self.p_intensity_percentiles_['values'][-1]
+            m_min = self.m_intensity_percentiles_['values'][0]
+            m_max = self.m_intensity_percentiles_['values'][-1]
             # Handle edge cases to prevent divide by zero warnings
-            p_range = p_max - p_min
-            if p_range > 1e-8 and not np.isnan(p_range) and not np.isinf(p_range):
-                p_intensity_norm = np.clip((p_intensity - p_min) / p_range, 0, 1)
+            m_range = m_max - m_min
+            if m_range > 1e-8 and not np.isnan(m_range) and not np.isinf(m_range):
+                m_intensity_norm = np.clip((m_intensity - m_min) / m_range, 0, 1)
             else:
                 # If range is too small or invalid, use uniform values
-                p_intensity_norm = np.full_like(p_intensity, 0.5)
+                m_intensity_norm = np.full_like(m_intensity, 0.5)
         else:
             # Fallback normalization with better edge case handling
-            p_min = p_intensity.min()
-            p_max = p_intensity.max()
-            p_range = p_max - p_min
-            if p_range > 1e-8 and not np.isnan(p_range) and not np.isinf(p_range):
-                p_intensity_norm = (p_intensity - p_min) / p_range
+            m_min = m_intensity.min()
+            m_max = m_intensity.max()
+            m_range = m_max - m_min
+            if m_range > 1e-8 and not np.isnan(m_range) and not np.isinf(m_range):
+                m_intensity_norm = (m_intensity - m_min) / m_range
             else:
                 # If all values are the same or invalid, use uniform values
-                p_intensity_norm = np.full_like(p_intensity, 0.5)
+                m_intensity_norm = np.full_like(m_intensity, 0.5)
         
         # Use normalized intensity for threshold comparisons
         # Map target thresholds to intensity scale
@@ -163,20 +163,20 @@ class MinimalConcentrationFeatures(BaseEstimator, TransformerMixin):
         
         # Add concentration range indicators
         # These help models learn different behaviors for different concentration ranges
-        X_df['concentration_range_low'] = (p_intensity_norm <= low_intensity_threshold).astype(float)
-        X_df['concentration_range_high'] = (p_intensity_norm >= high_intensity_threshold).astype(float)
-        X_df['concentration_range_mid'] = ((p_intensity_norm > low_intensity_threshold) & 
-                                          (p_intensity_norm < high_intensity_threshold)).astype(float)
+        X_df['concentration_range_low'] = (m_intensity_norm <= low_intensity_threshold).astype(float)
+        X_df['concentration_range_high'] = (m_intensity_norm >= high_intensity_threshold).astype(float)
+        X_df['concentration_range_mid'] = ((m_intensity_norm > low_intensity_threshold) & 
+                                          (m_intensity_norm < high_intensity_threshold)).astype(float)
         
         # Add P intensity weighting feature
         # This creates a smooth weighting that emphasizes rare concentration ranges
         # Use normalized intensity percentile for weighting
-        intensity_percentile = p_intensity_norm
+        intensity_percentile = m_intensity_norm
         
         # Create concentration-dependent weighting (higher weight for extreme values)
-        p_intensity_weight = 1.0 + 2.0 * (np.abs(intensity_percentile - 0.5) ** 2)
-        X_df['p_intensity_weight'] = p_intensity_weight
-            
+        m_intensity_weight = 1.0 + 2.0 * (np.abs(intensity_percentile - 0.5) ** 2)
+        X_df['m_intensity_weight'] = m_intensity_weight
+
         # Add distribution emphasis feature
         # This helps models focus on underrepresented regions
         distribution_emphasis = np.where(
@@ -212,18 +212,18 @@ class MinimalConcentrationFeatures(BaseEstimator, TransformerMixin):
     def _calculate_p_intensity_percentiles(self, X):
         """Calculate P intensity percentiles for weighting."""
         try:
-            p_intensity = self._extract_p_intensity_proxy(X)
+            m_intensity = self._extract_m_intensity_proxy(X)
             percentiles = np.linspace(0, 100, 101)
-            values = np.percentile(p_intensity, percentiles)
+            values = np.percentile(m_intensity, percentiles)
             return {
                 'percentiles': percentiles / 100.0,  # Convert to 0-1 range
                 'values': values
             }
         except Exception as e:
-            logger.warning(f"Could not calculate P intensity percentiles: {e}")
+            logger.warning(f"Could not calculate M intensity percentiles: {e}")
             return None
             
-    def _extract_p_intensity_proxy(self, X):
+    def _extract_m_intensity_proxy(self, X):
         """
         Extract a proxy for magnesium intensity from raw spectral data.
         
@@ -240,9 +240,9 @@ class MinimalConcentrationFeatures(BaseEstimator, TransformerMixin):
         percentile_90 = np.percentile(X_array, 90, axis=1)
         
         # Combine peak and high percentile for more robust proxy
-        p_intensity_proxy = 0.7 * peak_intensity + 0.3 * percentile_90
+        m_intensity_proxy = 0.7 * peak_intensity + 0.3 * percentile_90
         
-        return p_intensity_proxy
+        return m_intensity_proxy
 
 class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
     """
@@ -420,26 +420,26 @@ class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
         self.feature_statistics_ = {}
         
         # Learn P intensity characteristics if available
-        p_intensity_cols = [col for col in X.columns if 'P_I' in col and ('peak_area' in col or 'peak_height' in col)]
-        if p_intensity_cols:
-            p_intensities = X[p_intensity_cols].fillna(0).sum(axis=1)
-            self.p_intensity_percentiles_ = {
-                'p10': np.percentile(p_intensities, 10),
-                'p25': np.percentile(p_intensities, 25),
-                'p50': np.percentile(p_intensities, 50),
-                'p75': np.percentile(p_intensities, 75),
-                'p90': np.percentile(p_intensities, 90)
+        m_intensity_cols = [col for col in X.columns if 'M_I' in col and ('peak_area' in col or 'peak_height' in col)]
+        if m_intensity_cols:
+            m_intensities = X[m_intensity_cols].fillna(0).sum(axis=1)
+            self.m_intensity_percentiles_ = {
+                'm10': np.percentile(m_intensities, 10),
+                'm25': np.percentile(m_intensities, 25),
+                'm50': np.percentile(m_intensities, 50),
+                'm75': np.percentile(m_intensities, 75),
+                'm90': np.percentile(m_intensities, 90)
             }
             
         # Learn P/C ratio characteristics if available
-        if 'P_C_ratio' in X.columns:
-            pc_ratios = X['P_C_ratio'].fillna(0)
-            self.pc_ratio_percentiles_ = {
-                'p10': np.percentile(pc_ratios, 10),
-                'p25': np.percentile(pc_ratios, 25),
-                'p50': np.percentile(pc_ratios, 50),
-                'p75': np.percentile(pc_ratios, 75),
-                'p90': np.percentile(pc_ratios, 90)
+        if 'M_C_ratio' in X.columns:
+            mc_ratios = X['M_C_ratio'].fillna(0)
+            self.mc_ratio_percentiles_ = {
+                'm10': np.percentile(mc_ratios, 10),
+                'm25': np.percentile(mc_ratios, 25),
+                'm50': np.percentile(mc_ratios, 50),
+                'm75': np.percentile(mc_ratios, 75),
+                'm90': np.percentile(mc_ratios, 90)
             }
             
         # Only learn statistics for elements that are actually present in the transformed features
@@ -447,7 +447,7 @@ class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
         elements_to_track = []
         
         # Always track P_I (magnesium) as it's the target element
-        elements_to_track.append('P_I')
+        elements_to_track.append('M_I')
         
         # Check if C_I features exist (used for P/C ratio)
         if any('C_I' in col for col in X.columns):
@@ -455,7 +455,7 @@ class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
             
         # Only add other elements if they're actually present in the features
         # These would only be present if enable_oxygen_hydrogen or other flags are True
-        for element in ['N_I', 'H_I', 'O_I', 'CA_I', 'K_I', 'S_I', 'MG_I']:
+        for element in ['N_I', 'H_I', 'O_I', 'CA_I', 'K_I', 'S_I', 'P_I']:
             if any(element in col for col in X.columns):
                 elements_to_track.append(element)
                 logger.debug(f"Found {element} features in data, will track statistics")
@@ -488,19 +488,19 @@ class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
             
         if self.enable_spectral_modulation and self.p_intensity_percentiles_:
             self.feature_names_out_.extend([
-                'p_intensity_concentration_weight',
-                'p_spectral_concentration_indicator'
+                'm_intensity_concentration_weight',
+                'm_spectral_concentration_indicator'
             ])
             
         if self.enable_ratio_adjustments and 'P_C_ratio' in X.columns:
             self.feature_names_out_.extend([
-                'pc_ratio_concentration_adjusted',
-                'pc_ratio_extreme_indicator'
+                'mc_ratio_concentration_adjusted',
+                'mc_ratio_extreme_indicator'
             ])
             
         if self.enable_concentration_interactions:
             # Add interaction features for key spectral features
-            key_features = [col for col in X.columns if any(key in col for key in ['P_I_simple', 'P_C_ratio', 'PC_height_ratio'])][:3]
+            key_features = [col for col in X.columns if any(key in col for key in ['M_I_simple', 'M_C_ratio', 'MC_height_ratio'])][:3]
             for feature in key_features:
                 self.feature_names_out_.append(f'{feature}_concentration_interaction')
                 
@@ -550,33 +550,33 @@ class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
         This helps models learn that the same spectral intensity might indicate
         different concentrations depending on other contextual features.
         """
-        if not self.p_intensity_percentiles_:
+        if not self.m_intensity_percentiles_:
             return X
             
         # Calculate P intensity concentration weight
-        p_intensity_cols = [col for col in X.columns if 'P_I' in col and ('peak_area' in col or 'peak_height' in col)]
-        if p_intensity_cols:
-            p_intensities = X[p_intensity_cols].fillna(0).sum(axis=1)
+        m_intensity_cols = [col for col in X.columns if 'M_I' in col and ('peak_area' in col or 'peak_height' in col)]
+        if m_intensity_cols:
+            m_intensities = X[m_intensity_cols].fillna(0).sum(axis=1)
             
             # Create concentration-dependent weighting
             # High weights for extreme values (low/high concentrations)
             intensity_percentile = np.clip(
-                (p_intensities - self.p_intensity_percentiles_['p10']) / 
-                (self.p_intensity_percentiles_['p90'] - self.p_intensity_percentiles_['p10'] + 1e-6), 
+                (m_intensities - self.m_intensity_percentiles_['m10']) / 
+                (self.m_intensity_percentiles_['m90'] - self.m_intensity_percentiles_['m10'] + 1e-6), 
                 0, 1
             )
             
             # U-shaped weighting: higher weights for extreme percentiles
             concentration_weight = 1.0 + 2.0 * (np.abs(intensity_percentile - 0.5) ** 2)
-            X['p_intensity_concentration_weight'] = concentration_weight
+            X['m_intensity_concentration_weight'] = concentration_weight
             
             # Binary indicator for extreme P intensities
-            extreme_mask = (p_intensities <= self.p_intensity_percentiles_['p10']) | \
-                          (p_intensities >= self.p_intensity_percentiles_['p90'])
-            X['p_spectral_concentration_indicator'] = extreme_mask.astype(float)
+            extreme_mask = (m_intensities <= self.m_intensity_percentiles_['m10']) | \
+                          (m_intensities >= self.m_intensity_percentiles_['m90'])
+            X['m_spectral_concentration_indicator'] = extreme_mask.astype(float)
         else:
-            X['p_intensity_concentration_weight'] = 1.0
-            X['p_spectral_concentration_indicator'] = 0.0
+            X['m_intensity_concentration_weight'] = 1.0
+            X['m_spectral_concentration_indicator'] = 0.0
             
         return X
         
@@ -587,21 +587,21 @@ class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
         These help capture non-linear relationships between ratios and concentration
         that might be missed by standard ratio features.
         """
-        if 'P_C_ratio' not in X.columns or not self.pc_ratio_percentiles_:
+        if 'M_C_ratio' not in X.columns or not self.mc_ratio_percentiles_:
             return X
             
-        pc_ratio = X['P_C_ratio'].fillna(0)
+        mc_ratio = X['M_C_ratio'].fillna(0)
         
-        # Concentration-adjusted P/C ratio
+        # Concentration-adjusted M/C ratio
         # Apply stronger adjustment for extreme values
-        ratio_adjustment = 1.0 + 0.5 * np.abs(pc_ratio - self.pc_ratio_percentiles_['p50']) / (
-            self.pc_ratio_percentiles_['p75'] - self.pc_ratio_percentiles_['p25'] + 1e-6)
-        X['pc_ratio_concentration_adjusted'] = pc_ratio * ratio_adjustment
+        ratio_adjustment = 1.0 + 0.5 * np.abs(mc_ratio - self.mc_ratio_percentiles_['m50']) / (
+            self.mc_ratio_percentiles_['m75'] - self.mc_ratio_percentiles_['m25'] + 1e-6)
+        X['mc_ratio_concentration_adjusted'] = mc_ratio * ratio_adjustment
         
         # Extreme ratio indicator
-        extreme_ratio_mask = (pc_ratio <= self.pc_ratio_percentiles_['p10']) | \
-                            (pc_ratio >= self.pc_ratio_percentiles_['p90'])
-        X['pc_ratio_extreme_indicator'] = extreme_ratio_mask.astype(float)
+        extreme_ratio_mask = (mc_ratio <= self.mc_ratio_percentiles_['m10']) | \
+                            (mc_ratio >= self.mc_ratio_percentiles_['m90'])
+        X['mc_ratio_extreme_indicator'] = extreme_ratio_mask.astype(float)
         
         return X
         
@@ -615,7 +615,7 @@ class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
         concentration_score = self._estimate_concentration_likelihood(X)
         
         # Add interactions with key features
-        key_features = [col for col in X.columns if any(key in col for key in ['P_I_simple', 'P_C_ratio', 'PC_height_ratio'])][:3]
+        key_features = [col for col in X.columns if any(key in col for key in ['M_I_simple', 'M_C_ratio', 'MC_height_ratio'])][:3]
         
         for feature in key_features:
             if feature in X.columns:
@@ -640,23 +640,23 @@ class ConcentrationRangeFeatures(BaseEstimator, TransformerMixin):
         score = np.full(len(X), default_concentration)
         
         # Use P intensity if available
-        if self.p_intensity_percentiles_:
-            p_intensity_cols = [col for col in X.columns if 'P_I' in col and ('peak_area' in col or 'peak_height' in col)]
-            if p_intensity_cols:
-                p_intensities = X[p_intensity_cols].fillna(0).sum(axis=1)
+        if self.m_intensity_percentiles_:
+            m_intensity_cols = [col for col in X.columns if 'M_I' in col and ('peak_area' in col or 'peak_height' in col)]
+            if m_intensity_cols:
+                m_intensities = X[m_intensity_cols].fillna(0).sum(axis=1)
                 # Normalize to target concentration range
-                intensity_norm = (p_intensities - self.p_intensity_percentiles_['p10']) / (
-                    self.p_intensity_percentiles_['p90'] - self.p_intensity_percentiles_['p10'] + 1e-6)
+                intensity_norm = (m_intensities - self.m_intensity_percentiles_['m10']) / (
+                    self.m_intensity_percentiles_['m90'] - self.m_intensity_percentiles_['m10'] + 1e-6)
                 # Map to actual target range instead of fixed range
                 min_target = self.target_statistics_['min'] if self.target_statistics_ else 0.2
                 max_target = self.target_statistics_['max'] if self.target_statistics_ else 0.5
                 score = min_target + (max_target - min_target) * np.clip(intensity_norm, 0, 1)
                 
         # Adjust with P/C ratio if available
-        if 'P_C_ratio' in X.columns and self.pc_ratio_percentiles_:
-            pc_ratio = X['P_C_ratio'].fillna(0)
-            ratio_norm = (pc_ratio - self.pc_ratio_percentiles_['p25']) / (
-                self.pc_ratio_percentiles_['p75'] - self.pc_ratio_percentiles_['p25'] + 1e-6)
+        if 'M_C_ratio' in X.columns and self.mc_ratio_percentiles_:
+            mc_ratio = X['M_C_ratio'].fillna(0)
+            ratio_norm = (mc_ratio - self.mc_ratio_percentiles_['m25']) / (
+                self.mc_ratio_percentiles_['m75'] - self.mc_ratio_percentiles_['m25'] + 1e-6)
             ratio_adjustment = concentration_range * 0.2 * np.clip(ratio_norm, -1, 1)  # Scale by actual range
             min_target = self.target_statistics_['min'] if self.target_statistics_ else 0.15
             max_target = self.target_statistics_['max'] if self.target_statistics_ else 0.5

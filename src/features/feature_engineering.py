@@ -289,8 +289,8 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         base_features_df = pd.DataFrame(base_features_list, index=X.index)
 
         p_area = (
-            base_features_df["P_I_peak_0"]
-            if "P_I_peak_0" in base_features_df
+            base_features_df["M_I_peak_0"]
+            if "M_I_peak_0" in base_features_df
             else pd.Series(np.nan, index=base_features_df.index)
         )
         c_area = (
@@ -300,8 +300,8 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         )
 
         # Calculate PC_ratio with clipping to prevent extreme values
-        pc_ratio_raw = p_area / c_area.replace(0, 1e-6)
-        base_features_df["P_C_ratio"] = np.clip(pc_ratio_raw, -50.0, 50.0)
+        mc_ratio_raw = p_area / c_area.replace(0, 1e-6)
+        base_features_df["M_C_ratio"] = np.clip(mc_ratio_raw, -50.0, 50.0)
 
         # Choose feature generation method based on config
         if self.config.use_focused_magnesium_features:
@@ -442,7 +442,7 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         sample_base_df = pd.DataFrame([self._extract_base_features(X_sample.iloc[0])])
         self._use_enhanced = use_enhanced_temp
 
-        sample_base_df["P_C_ratio"] = 0.0
+        sample_base_df["M_C_ratio"] = 0.0
         # Choose feature generation method based on config for feature name determination
         if self.config.use_focused_magnesium_features:
             _, self._high_p_names = generate_focused_magnesium_features(
@@ -466,20 +466,20 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
             enhanced_names = list(enhanced_sample.keys())
 
         if self.strategy == "Mg_only":
-            p_complex = [name for name in all_complex_names if name.startswith("P_I_")]
-            p_simple = [
-                name for name in self._all_simple_names if name.startswith("P_I_simple")
+            m_complex = [name for name in all_complex_names if name.startswith("M_I_")]
+            m_simple = [
+                name for name in self._all_simple_names if name.startswith("M_I_simple")
             ]
-            p_enhanced = [
+            m_enhanced = [
                 name
                 for name in enhanced_names
                 if "Mg" in name or "magnesium" in name.lower()
             ]
-            self.feature_names_out_ = p_complex + p_simple + p_enhanced
+            self.feature_names_out_ = m_complex + m_simple + m_enhanced
         elif self.strategy == "simple_only":
             self.feature_names_out_ = (
                 self._all_simple_names
-                + ["P_C_ratio"]
+                + ["M_C_ratio"]
                 + self._high_p_names
                 + enhanced_names
             )
@@ -487,7 +487,7 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
             self.feature_names_out_ = (
                 all_complex_names
                 + self._all_simple_names
-                + ["P_C_ratio"]
+                + ["M_C_ratio"]
                 + self._high_p_names
                 + enhanced_names
             )
@@ -543,27 +543,27 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
                 self._extract_simple_region_features(region, wavelengths, intensities)
             )
 
-        p_area, c_area = (
-            features.get("P_I_peak_0", np.nan),
+        m_area, c_area = (
+            features.get("M_I_peak_0", np.nan),
             features.get("C_I_peak_0", np.nan),
         )
-        pc_ratio = (
-            p_area / c_area
-            if not np.isnan(p_area) and not np.isnan(c_area) and c_area > 1e-6
+        mc_ratio = (
+            m_area / c_area
+            if not np.isnan(m_area) and not np.isnan(c_area) and c_area > 1e-6
             else np.nan
         )
 
         # Clip PC_ratio to reasonable bounds to prevent extreme values in derived features
-        if not np.isnan(pc_ratio):
-            pc_ratio = np.clip(pc_ratio, -50.0, 50.0)
+        if not np.isnan(mc_ratio):
+            mc_ratio = np.clip(mc_ratio, -50.0, 50.0)
 
         features.update(
             {
-                "P_C_ratio": pc_ratio,
-                "PC_ratio_squared": pc_ratio**2 if not np.isnan(pc_ratio) else np.nan,
-                "PC_ratio_cubic": pc_ratio**3 if not np.isnan(pc_ratio) else np.nan,
-                "PC_ratio_log": np.log1p(np.abs(pc_ratio))
-                if not np.isnan(pc_ratio)
+                "M_C_ratio": mc_ratio,
+                "MC_ratio_squared": mc_ratio**2 if not np.isnan(mc_ratio) else np.nan,
+                "MC_ratio_cubic": mc_ratio**3 if not np.isnan(mc_ratio) else np.nan,
+                "MC_ratio_log": np.log1p(np.abs(mc_ratio))
+                if not np.isnan(mc_ratio)
                 else np.nan,
             }
         )

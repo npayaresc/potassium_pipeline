@@ -198,9 +198,9 @@ class ParallelSpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         base_features_df = pd.DataFrame(base_features_list, index=X.index)
         
         # Calculate P/C ratio
-        p_area = (
-            base_features_df["P_I_peak_0"]
-            if "P_I_peak_0" in base_features_df
+        m_area = (
+            base_features_df["M_I_peak_0"]
+            if "M_I_peak_0" in base_features_df
             else pd.Series(np.nan, index=base_features_df.index)
         )
         c_area = (
@@ -209,8 +209,8 @@ class ParallelSpectralFeatureGenerator(BaseEstimator, TransformerMixin):
             else pd.Series(np.nan, index=base_features_df.index)
         )
         
-        pc_ratio_raw = p_area / c_area.replace(0, 1e-6)
-        base_features_df["P_C_ratio"] = np.clip(pc_ratio_raw, -50.0, 50.0)
+        mc_ratio_raw = m_area / c_area.replace(0, 1e-6)
+        base_features_df["M_C_ratio"] = np.clip(mc_ratio_raw, -50.0, 50.0)
         
         # Generate additional features based on config
         if self.config.use_focused_magnesium_features:
@@ -280,7 +280,7 @@ class ParallelSpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         ))
         
         sample_base_df = pd.DataFrame([sample_features['features']])
-        sample_base_df["P_C_ratio"] = 0.0
+        sample_base_df["M_C_ratio"] = 0.0
         
         # Get high magnesium feature names
         if self.config.use_focused_magnesium_features:
@@ -305,20 +305,20 @@ class ParallelSpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         
         # Set feature names based on strategy
         if self.strategy == "Mg_only":
-            p_complex = [name for name in all_complex_names if name.startswith("P_I_")]
-            p_simple = [
-                name for name in self._all_simple_names if name.startswith("P_I_simple")
+            m_complex = [name for name in all_complex_names if name.startswith("M_I_")]
+            m_simple = [
+                name for name in self._all_simple_names if name.startswith("M_I_simple")
             ]
-            p_enhanced = [
+            m_enhanced = [
                 name
                 for name in enhanced_names
                 if "Mg" in name or "magnesium" in name.lower()
             ]
-            self.feature_names_out_ = p_complex + p_simple + p_enhanced
+            self.feature_names_out_ = m_complex + m_simple + m_enhanced
         elif self.strategy == "simple_only":
             self.feature_names_out_ = (
                 self._all_simple_names
-                + ["P_C_ratio"]
+                + ["M_C_ratio"]
                 + self._high_p_names
                 + enhanced_names
             )
@@ -326,7 +326,7 @@ class ParallelSpectralFeatureGenerator(BaseEstimator, TransformerMixin):
             self.feature_names_out_ = (
                 all_complex_names
                 + self._all_simple_names
-                + ["P_C_ratio"]
+                + ["M_C_ratio"]
                 + self._high_p_names
                 + enhanced_names
             )

@@ -1379,7 +1379,9 @@ def run_classification_pipeline(threshold=0.3, strategy="simple_only", models=No
     
     # Initialize classification trainer
     from src.models.classification_trainer import ClassificationTrainer
-    trainer = ClassificationTrainer(cfg, strategy, threshold)
+    trainer = ClassificationTrainer(cfg, strategy, threshold, 
+                                  use_parallel_features=use_parallel, 
+                                  feature_n_jobs=n_jobs)
     
     # Filter models if specified
     if models:

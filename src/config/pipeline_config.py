@@ -62,7 +62,8 @@ class ModelParamsConfig(BaseModel):
         "learning_rate": 0.05,      # Reduced from 0.1
         "depth": 4,                 # Reduced from 6
         "min_data_in_leaf": 3,      # Added regularization (CatBoost equivalent)
-        "subsample": 0.8            # Added subsample
+        "subsample": 0.8,           # Added subsample
+        "bootstrap_type": "Bernoulli"  # Required to use subsample parameter
     }
     
     # SVR - kept same but can adjust C for more regularization if needed
@@ -358,11 +359,24 @@ class DimensionReductionConfig(BaseModel):
             
         return params
 
+class ParallelConfig(BaseModel):
+    """Configuration for parallel processing and resource utilization."""
+    # Feature engineering parallelization
+    use_feature_parallel: bool = True  # Enable parallel feature extraction (--feature-parallel)
+    use_data_parallel: bool = True     # Enable parallel data processing (--data-parallel)
+    
+    # Number of jobs for different operations
+    feature_n_jobs: int = -1    # Jobs for feature engineering (-1 = use all cores)
+    data_n_jobs: int = -1       # Jobs for data processing operations (-1 = use all cores)
+    model_n_jobs: int = 1       # Jobs for model training/optimization
+    
+    # Override for specific operations (can be set per operation)
+    override_single_threaded: bool = False  # Force single-threaded for debugging
+
 class TunerConfig(BaseModel):
     """Configuration for the Optuna hyperparameter tuner."""
     n_trials: int = 400
     timeout: int = 12000
-    n_jobs: int = 8
     #models_to_tune: List[str] = ["random_forest", "xgboost", "lightgbm", "catboost", "svr", "extratrees"]
     models_to_tune: List[str] = ["extratrees"]
     # Use this to select the tuning goal.
@@ -556,10 +570,10 @@ class Config(BaseModel):
     max_samples: Optional[int] = None
     
     # ADDED: Configuration for target value filtering - focused on 0.2-0.5 range
-    target_value_min: Optional[float] = 0 # Focus closer to target range for better 0.2-0.5 performance
-    target_value_max: Optional[float] = 1.0  # Focus closer to target range for better 0.2-0.5 performance
+    target_value_min: Optional[float] = None # Focus closer to target range for better 0.2-0.5 performance
+    target_value_max: Optional[float] = None  # Focus closer to target range for better 0.2-0.5 performance
     
-    # Custom validation set directory - if provided, will process raw files from this directory for validation
+    # Custom validation set directory - if providedone, will process raw files from this directory for validation
     #custom_validation_dir: Optional[str] = "/home/payanico/magnesium_pipeline/data/raw/combo_6_8"
     custom_validation_dir: Optional[str] = None
 
@@ -567,11 +581,20 @@ class Config(BaseModel):
     enable_wavelength_standardization: bool = False
     wavelength_interpolation_method: Literal['linear', 'cubic', 'nearest'] = 'linear'
     wavelength_resolution: float = 0.1  # nm resolution for standardized grid
+    
+    # Feature Selection Configuration - to handle high-dimension/low-sample scenario
+    use_feature_selection: bool = True  # Enable/disable feature selection
+    feature_selection_method: Literal['selectkbest', 'rfe', 'lasso', 'mutual_info', 'tree_importance'] = 'selectkbest'
+    n_features_to_select: Union[int, float] = 0.6  # Number of features to select (int) or fraction (float < 1.0)
+    feature_selection_score_func: Literal['f_regression', 'mutual_info_regression'] = 'f_regression'  # For SelectKBest
+    rfe_estimator: Literal['random_forest', 'xgboost', 'lightgbm'] = 'random_forest'  # For RFE
+    lasso_alpha: float = 0.01  # Alpha parameter for LASSO feature selection
+    tree_importance_threshold: float = 0.001  # Minimum feature importance threshold
 
     # Outlier detection settings - RELAXED for more training data
     outlier_method: str = 'SAM'
-    outlier_threshold: float = 0.85          # More lenient to keep borderline samples
-    max_outlier_percentage: float = 30.0     # Limit removal to preserve training data
+    outlier_threshold: float = 0.95          # More lenient to keep borderline samples
+    max_outlier_percentage: float = 50.0     # Limit removal to preserve training data
     
     # Alternative options (not used in best run):
     # outlier_threshold: float = 0.85          # 85% similarity threshold  
@@ -584,15 +607,40 @@ class Config(BaseModel):
             raise ValueError("outlier_method must be 'SAM' or 'MAD'")
         return v.upper()
 
+    # Literature-verified Magnesium LIBS spectral lines:
+    # According to NIST and LIBS literature:
+    # - 285.2 nm: Most prominent Mg I line (resonance line)
+    # - 383.8 nm: Strong Mg I line
+    # - 516.7-518.4 nm: Mg I triplet (516.7, 517.3, 518.4 nm)
+    # - 279.5-280.3 nm: Mg II ionic lines (279.55, 279.80, 280.27 nm)
+    
+    # Primary magnesium region - Mg I triplet around 517 nm
+    # Original setting kept but commented for reference
+    # magnesium_region: PeakRegion = PeakRegion(
+    #     element="M_I", lower_wavelength=515.77, upper_wavelength=517.77, center_wavelengths=[516.77])
+    
+    # Updated based on literature: Mg I triplet at 516.7, 517.3, 518.4 nm
     magnesium_region: PeakRegion = PeakRegion(
-        element="M_I", lower_wavelength=515.77, upper_wavelength=517.77, center_wavelengths=[516.77])
+        element="M_I", lower_wavelength=516.0, upper_wavelength=519.0, center_wavelengths=[516.7, 517.3, 518.4])
     
     
     context_regions: List[PeakRegion] = [
         PeakRegion(element="C_I", lower_wavelength=832.5, upper_wavelength=834.5, center_wavelengths=[833.5]),
         PeakRegion(element="CA_I_help", lower_wavelength=525.1, upper_wavelength=527.1, center_wavelengths=[526.1]),
         PeakRegion(element="N_I_help", lower_wavelength=741.0, upper_wavelength=743.0, center_wavelengths=[742.0]),
-        PeakRegion(element="Mg_secondary", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[280.3]),
+        
+        # Original Mg secondary region (kept but can be refined)
+        # PeakRegion(element="Mg_secondary", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[280.3]),
+        
+        # Literature-based Mg II ionic lines (279.55, 279.80, 280.27 nm)
+        PeakRegion(element="Mg_II", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[279.55, 279.80, 280.27]),
+        
+        # Most prominent Mg I line at 285.2 nm (adding as new region)
+        PeakRegion(element="Mg_I_285", lower_wavelength=284.5, upper_wavelength=286.0, center_wavelengths=[285.2]),
+        
+        # Strong Mg I line at 383.8 nm (adding as new region)  
+        PeakRegion(element="Mg_I_383", lower_wavelength=383.0, upper_wavelength=384.5, center_wavelengths=[383.8]),
+        
         #PeakRegion(element="P_I_secondary", lower_wavelength=653.5, upper_wavelength=656.5, center_wavelengths=[654.5]),
         PeakRegion(element="K_I_help", lower_wavelength=768.79, upper_wavelength=770.79, center_wavelengths=[769.79]),
     ]
@@ -611,8 +659,15 @@ class Config(BaseModel):
         PeakRegion(element="S_I", lower_wavelength=834.5, upper_wavelength=836.5, center_wavelengths=[835.5]),
         PeakRegion(element="S_I_2", lower_wavelength=868.0, upper_wavelength=870.0, center_wavelengths=[869.0]),
         PeakRegion(element="P_I", lower_wavelength=653.56, upper_wavelength=655.56, center_wavelengths=[654.56]),
+        
+        # Original Mg lines kept commented for reference
         #PeakRegion(element="Mg_I", lower_wavelength=515.7, upper_wavelength=517.7, center_wavelengths=[516.7]),
         #PeakRegion(element="Mg_II", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[280.3]),
+        
+        # Note: Primary Mg lines are already defined in magnesium_region and context_regions
+        # to avoid duplication. If needed for macro_elements analysis, uncomment below:
+        # PeakRegion(element="Mg_I_macro", lower_wavelength=516.0, upper_wavelength=519.0, center_wavelengths=[516.7, 517.3, 518.4]),
+        # PeakRegion(element="Mg_II_macro", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[279.55, 279.80, 280.27]),
     ]
     
     # Micro elements
@@ -637,7 +692,7 @@ class Config(BaseModel):
     # Feature configuration flags - OPTIMIZED FOR MAGNESIUM
     enable_molecular_bands: bool = False   # CN/NH/NO bands can indicate organic matter affecting Mg
     enable_macro_elements: bool = True    # S, Mg, Ca, K - critical for Mg interactions
-    enable_micro_elements: bool = False    # Fe, Mn, B, Zn - compete with Mg uptake
+    enable_micro_elements: bool = True    # Fe, Mn, B, Zn - compete with Mg uptake
     enable_oxygen_hydrogen: bool = False   # H/O ratios affect Mg compounds
     enable_advanced_ratios: bool = True   # Mg/Ca, Mg/K ratios are critical
     enable_spectral_patterns: bool = True # Peak shapes help identify Mg compounds
@@ -721,9 +776,9 @@ class Config(BaseModel):
     #     pls_params={'scale': True, 'max_iter': 500}
     #)
     dimension_reduction: DimensionReductionConfig = DimensionReductionConfig(
-        method='pls',
-        n_components=30,
-        pls_params={'scale': True, 'max_iter': 3000},
+        method='pca',
+        n_components=0.95,
+        #pls_params={'scale': True, 'max_iter': 3000},
         #n_components=0.97,  # VAE requires integer for latent dimension
         # Uncomment to override default vae_params:
         # vae_params={
@@ -738,6 +793,11 @@ class Config(BaseModel):
     use_sample_weights: bool = True  # ENABLED GLOBALLY: Critical for handling extreme concentration ranges
     sample_weight_method: Literal['legacy', 'improved', 'weighted_r2', 'distribution_based', 'hybrid'] = 'distribution_based'
     
+    # Post-processing calibration for improving prediction accuracy
+    use_post_calibration: bool = True # Enable isotonic regression post-processing
+    post_calibration_method: Literal['isotonic', 'linear', 'piecewise'] = 'isotonic'
+    post_calibration_target: Literal['within_20.5', 'mape'] = 'within_20.5'  # Target metric to oeptimize
+    
     # Concentration-aware feature enhancement (Option A alternative to sample weighting)
     use_concentration_features: bool = True  # Enable concentration-range features for AutoGluon
     
@@ -748,6 +808,9 @@ class Config(BaseModel):
 
     log_file: str = "pipeline.log"
     log_level: str = "INFO"
+    
+    # --- Parallel Processing ---
+    parallel: ParallelConfig = ParallelConfig()
     
     # --- Model Tuning ---
     tuner: TunerConfig = TunerConfig()

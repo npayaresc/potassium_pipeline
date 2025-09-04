@@ -56,7 +56,9 @@ submit_vertex_job() {
     local python_cmd="python main.py $training_mode"
     
     if [ -n "$models" ]; then
-        python_cmd="$python_cmd --models $models"
+        # Convert comma-separated models to space-separated for argparse
+        MODELS_SPACE_SEPARATED="${models//,/ }"
+        python_cmd="$python_cmd --models $MODELS_SPACE_SEPARATED"
     fi
     
     if [ -n "$strategy" ]; then

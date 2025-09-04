@@ -66,8 +66,17 @@ class AdvancedRatioCalculator:
             return np.clip(num / den, -100, 100)  # Clip to prevent extreme values
         
         # Get peak intensities (assuming peak_0 is the primary peak)
-        mg_intensity = features.get('M_I_peak_0', np.nan)  # Primary Mg line at 516.77nm
-        mg_secondary_intensity = features.get('Mg_secondary_peak_0', np.nan)  # Secondary at 280.3nm
+        # Updated to handle new region names from literature-verified spectral lines
+        # Primary Mg I triplet (516.7, 517.3, 518.4 nm) - will have multiple peaks
+        mg_intensity = features.get('M_I_peak_0', np.nan)  # First peak of Mg I triplet
+        
+        # Check for additional Mg peaks from the new regions
+        mg_ii_intensity = features.get('Mg_II_peak_0', np.nan)  # Mg II ionic lines at 279.55, 279.80, 280.27 nm
+        mg_285_intensity = features.get('Mg_I_285_peak_0', np.nan)  # Most prominent Mg I at 285.2 nm
+        mg_383_intensity = features.get('Mg_I_383_peak_0', np.nan)  # Strong Mg I at 383.8 nm
+        
+        # Use the most prominent line (285.2 nm) as secondary if available, otherwise use Mg II
+        mg_secondary_intensity = mg_285_intensity if not np.isnan(mg_285_intensity) else mg_ii_intensity
         k_intensity = features.get('K_I_help_peak_0', np.nan)
         s_intensity = features.get('S_I_peak_0', np.nan)
         ca_intensity = features.get('CA_I_help_peak_0', np.nan)
@@ -240,8 +249,9 @@ class PlasmaStateIndicators:
         n_ii = features.get('N_II_help_peak_0', np.nan)  # N II (ionic)
         p_i = features.get('P_I_peak_0', np.nan)  # P I (neutral)
         
-        mg_ii = features.get('Mg_II_peak_0', np.nan)  # Mg II (ionic)
-        mg_i = features.get('Mg_I_peak_0', np.nan)  # Mg I (neutral)
+        # Updated for new region names
+        mg_ii = features.get('Mg_II_peak_0', np.nan)  # Mg II (ionic) at 279.55, 279.80, 280.27 nm
+        mg_i = features.get('M_I_peak_0', np.nan)  # Mg I (neutral) triplet at 516.7, 517.3, 518.4 nm
         
         # Calculate ratios
         ratios = []
@@ -328,12 +338,19 @@ class EnhancedSpectralFeatures(BaseEstimator, TransformerMixin):
             enhanced_features['Mg_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
                 mg_intensity, mg_area, mg_fwhm)
             
-            # Also check secondary Mg line for self-absorption
-            mg2_intensity = X_features.get('Mg_secondary_peak_0', np.nan)
-            mg2_area = X_features.get('Mg_secondary_simple_peak_area', np.nan)
-            mg2_fwhm = enhanced_features.get('Mg_secondary_fwhm', np.nan)
-            enhanced_features['Mg_secondary_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
-                mg2_intensity, mg2_area, mg2_fwhm)
+            # Check most prominent Mg line (285.2 nm) for self-absorption
+            mg_285_intensity = X_features.get('Mg_I_285_peak_0', np.nan)
+            mg_285_area = X_features.get('Mg_I_285_simple_peak_area', np.nan)
+            mg_285_fwhm = enhanced_features.get('Mg_I_285_fwhm', np.nan)
+            enhanced_features['Mg_285_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
+                mg_285_intensity, mg_285_area, mg_285_fwhm)
+            
+            # Also check Mg II ionic lines for self-absorption
+            mg_ii_intensity = X_features.get('Mg_II_peak_0', np.nan)
+            mg_ii_area = X_features.get('Mg_II_simple_peak_area', np.nan)
+            mg_ii_fwhm = enhanced_features.get('Mg_II_fwhm', np.nan)
+            enhanced_features['Mg_II_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
+                mg_ii_intensity, mg_ii_area, mg_ii_fwhm)
         
         # 5. Plasma indicators
         if self.config.enable_plasma_indicators:

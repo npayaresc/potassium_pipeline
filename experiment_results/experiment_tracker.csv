@@ -2,3 +2,4 @@ experiment_id,timestamp,phase,config_file,status,r2,mape,mae,notes
 exp_20250830_185536_766082,Sa 30. Aug 18:55:37 WEST 2025,phase1_features,./experiment_configs/exp_20250830_185536_766082_phase1_Mg_only_rawtrue_focusedtrue.yaml,FAILED,,,,
 exp_20250830_185718_773422,Sa 30. Aug 18:57:19 WEST 2025,phase1_features,./experiment_configs/exp_20250830_185718_773422_phase1_Mg_only_rawtrue_focusedtrue.yaml,FAILED,,,,
 exp_20250830_190427_802288,Sa 30. Aug 19:04:28 WEST 2025,phase1_features,./experiment_configs/exp_20250830_190427_802288_phase1_Mg_only_rawtrue_focusedtrue.yaml,FAILED,,,,
+exp_20250901_123541_984128,Mo 1. Sep 12:35:59 WEST 2025,phase1_features,./experiment_configs/exp_20250901_123541_984128_phase1_Mg_only_rawtrue_focusedtrue.yaml,FAILED,,,,

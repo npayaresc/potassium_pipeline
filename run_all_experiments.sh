@@ -226,7 +226,9 @@ EOF
     local python_cmd="python main.py $training_mode"
     
     if [ -n "$MODELS_TO_TRAIN" ]; then
-        python_cmd="$python_cmd --models $MODELS_TO_TRAIN"
+        # Convert comma-separated models to space-separated for argparse
+        MODELS_SPACE_SEPARATED="${MODELS_TO_TRAIN//,/ }"
+        python_cmd="$python_cmd --models $MODELS_SPACE_SEPARATED"
     fi
     
     if [ -n "$FEATURE_STRATEGY" ]; then

@@ -227,7 +227,9 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
                 raw_data = {name: np.nan for name in self.feature_names_out_}
                 results.append(raw_data)
 
-        df_result = pd.DataFrame(results, index=X.index)
+        # Create DataFrame with safe index handling
+        index_to_use = X.index if hasattr(X, 'index') else None
+        df_result = pd.DataFrame(results, index=index_to_use)
 
         # Ensure all expected columns are present (fill missing with NaN)
         for col in self.feature_names_out_:
@@ -286,7 +288,9 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         base_features_list = [
             self._extract_base_features(row) for _, row in X.iterrows()
         ]
-        base_features_df = pd.DataFrame(base_features_list, index=X.index)
+        # Create DataFrame with safe index handling
+        index_to_use = X.index if hasattr(X, 'index') else None
+        base_features_df = pd.DataFrame(base_features_list, index=index_to_use)
 
         p_area = (
             base_features_df["M_I_peak_0"]
@@ -349,7 +353,8 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         )
 
         # Ensure the final dataframe maintains the original index
-        final_df.index = X.index
+        if hasattr(X, 'index'):
+            final_df.index = X.index
 
         logger.info(
             "Transformed data into %d features for strategy '%s'.",

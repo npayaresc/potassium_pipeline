@@ -1,0 +1,22 @@
+autogluon:
+  auto_stack: true
+  num_bag_folds: 5
+  num_bag_sets: 3
+  num_stack_levels: 2
+  presets: best_quality
+  time_limit: 14400
+dimension_reduction:
+  method: pca
+  n_components: 0.95
+enable_advanced_ratios: true
+enable_macro_elements: true
+enable_micro_elements: true
+enable_molecular_bands: false
+enable_oxygen_hydrogen: false
+enable_spectral_patterns: true
+use_concentration_features: true
+use_data_driven_thresholds: true
+use_dimension_reduction: true
+use_focused_magnesium_features: true
+use_sample_weights: true
+weight_method: improved

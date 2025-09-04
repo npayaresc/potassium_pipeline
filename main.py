@@ -14,8 +14,13 @@ Usage:
   - python main.py predict --input-file ... --model-path ... (Makes a prediction)
 """
 import argparse
+import base64
+import binascii
 import json
 import logging
+import os
+import tempfile
+import yaml
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +30,75 @@ import shutil
 
 from src.config.pipeline_config import config, Config
 from src.config.config_manager import config_manager
+
+def create_config_from_env():
+    """Create a temporary configuration file from environment variables starting with CONFIG_"""
+    config_dict = {}
+    
+    # Collect all CONFIG_* environment variables
+    for key, value in os.environ.items():
+        if key.startswith('CONFIG_'):
+            # Remove CONFIG_ prefix and convert to lowercase
+            config_key = key[7:].lower()
+            
+            # Handle nested configurations (e.g., CONFIG_AUTOGLUON_TIME_LIMIT -> autogluon.time_limit)
+            parts = config_key.split('_')
+            
+            # Convert string values to appropriate types
+            if value.lower() in ['true', 'false']:
+                value = value.lower() == 'true'
+            elif value.isdigit():
+                value = int(value)
+            elif '.' in value and value.replace('.', '').isdigit():
+                value = float(value)
+            
+            # Build nested dictionary structure
+            current = config_dict
+            for part in parts[:-1]:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+            current[parts[-1]] = value
+    
+    # Create temporary YAML file
+    temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
+    yaml.dump(config_dict, temp_file, default_flow_style=False, indent=2)
+    temp_file.close()
+    
+    return temp_file.name
+
+def create_config_from_json(json_string):
+    """Create a temporary configuration file from JSON string"""
+    try:
+        import json
+        config_dict = json.loads(json_string)
+        
+        # Create temporary YAML file
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
+        yaml.dump(config_dict, temp_file, default_flow_style=False, indent=2)
+        temp_file.close()
+        
+        return temp_file.name
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON configuration: {e}")
+
+def create_config_from_base64(base64_string):
+    """Create a temporary configuration file from base64-encoded JSON string"""
+    try:
+        import json
+        import base64
+        # Decode base64 to get JSON string
+        json_string = base64.b64decode(base64_string.encode('utf-8')).decode('utf-8')
+        config_dict = json.loads(json_string)
+        
+        # Create temporary YAML file
+        temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
+        yaml.dump(config_dict, temp_file, default_flow_style=False, indent=2)
+        temp_file.close()
+        
+        return temp_file.name
+    except (json.JSONDecodeError, binascii.Error) as e:
+        raise ValueError(f"Invalid base64-encoded JSON configuration: {e}")
 
 # Ensure directories exist for cloud deployments
 config.ensure_paths_exist(create_dirs=True)
@@ -554,7 +628,7 @@ def run_tuning_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False,
     logger.info("Hyperparameter tuning pipeline run completed successfully.")
 
 def run_xgboost_optimization_pipeline(use_gpu: bool = False, validation_dir: Optional[str] = None,
-                                     config_path: Optional[str] = None, strategy: str = "full_context",
+                                     config_path: Optional[str] = None, strategy: Optional[str] = None,
                                      n_trials: Optional[int] = None, timeout: Optional[int] = None,
                                      use_parallel: bool = False, n_jobs: int = -1):
     """Executes dedicated XGBoost optimization pipeline."""
@@ -572,6 +646,12 @@ def run_xgboost_optimization_pipeline(use_gpu: bool = False, validation_dir: Opt
         logger.info(f"Using timeout from config: {timeout}")
     else:
         logger.info(f"Using timeout from command line: {timeout}")
+    
+    if strategy is None:
+        strategy = cfg.feature_strategies[0] if cfg.feature_strategies else "simple_only"
+        logger.info(f"Using strategy from config: {strategy}")
+    else:
+        logger.info(f"Using strategy from command line: {strategy}")
         
     logger.info(f"Starting XGBoost optimization run: {cfg.run_timestamp}")
     
@@ -695,7 +775,7 @@ def run_xgboost_optimization_pipeline(use_gpu: bool = False, validation_dir: Opt
     return final_pipeline, train_metrics, test_metrics, optimizer.best_params
 
 def run_autogluon_optimization_pipeline(use_gpu: bool = False, validation_dir: Optional[str] = None,
-                                       config_path: Optional[str] = None, strategy: str = "full_context",
+                                       config_path: Optional[str] = None, strategy: Optional[str] = None,
                                        n_trials: Optional[int] = None, timeout: Optional[int] = None,
                                        use_parallel: bool = False, n_jobs: int = -1):
     """Executes dedicated AutoGluon optimization pipeline."""
@@ -716,6 +796,13 @@ def run_autogluon_optimization_pipeline(use_gpu: bool = False, validation_dir: O
         logger.info(f"Using timeout from config: {timeout}")
     else:
         logger.info(f"Using timeout from command line: {timeout}")
+    
+    if strategy is None:
+        strategy = cfg.feature_strategies[0] if cfg.feature_strategies else "simple_only"
+        logger.info(f"Using strategy from config: {strategy}")
+    else:
+        logger.info(f"Using strategy from command line: {strategy}")
+        
     logger.info(f"Starting AutoGluon optimization run: {cfg.run_timestamp}")
     
     run_data_preparation(cfg)
@@ -841,9 +928,10 @@ def run_autogluon_optimization_pipeline(use_gpu: bool = False, validation_dir: O
 
 def run_model_optimization_pipeline(model_names: list, use_gpu: bool = False, use_raw_spectral: bool = False,
                                    validation_dir: Optional[str] = None,
-                                   config_path: Optional[str] = None, strategy: str = "full_context",
+                                   config_path: Optional[str] = None, strategy: Optional[str] = None,
                                    n_trials: Optional[int] = None, timeout: Optional[int] = None,
-                                   use_parallel: bool = False, n_jobs: int = -1):
+                                   use_parallel: bool = False, n_jobs: int = -1,
+                                   use_data_parallel: bool = False, data_n_jobs: int = -1):
     """Executes optimization for specified models."""
     cfg = setup_pipeline_config(use_gpu, use_raw_spectral, validation_dir, config_path)
     
@@ -859,11 +947,17 @@ def run_model_optimization_pipeline(model_names: list, use_gpu: bool = False, us
         logger.info(f"Using timeout from config: {timeout}")
     else:
         logger.info(f"Using timeout from command line: {timeout}")
+    
+    if strategy is None:
+        strategy = cfg.feature_strategies[0] if cfg.feature_strategies else "simple_only"
+        logger.info(f"Using strategy from config: {strategy}")
+    else:
+        logger.info(f"Using strategy from command line: {strategy}")
         
     logger.info(f"Starting multi-model optimization run: {cfg.run_timestamp}")
     
-    run_data_preparation(cfg)
-    full_dataset, global_data_manager = load_and_clean_data(cfg)
+    run_data_preparation(cfg, use_data_parallel, data_n_jobs)
+    full_dataset, global_data_manager = load_and_clean_data(cfg, use_data_parallel, data_n_jobs)
     
     # Use either the passed validation_dir or the one from config
     validation_directory = validation_dir or cfg.custom_validation_dir
@@ -912,6 +1006,7 @@ def run_model_optimization_pipeline(model_names: list, use_gpu: bool = False, us
     
     # Run optimization for all specified models
     logger.info(f"Starting optimization for models: {model_names}")
+    logger.info(f"Training data shape: {X_train.shape}, columns: {list(X_train.columns[:5])}...")
     results = unified_optimizer.optimize_multiple_models(
         model_names, cfg, strategy, X_train, y_train, X_test, y_test, n_trials, timeout,
         use_parallel_features=use_parallel, feature_n_jobs=n_jobs
@@ -1248,6 +1343,71 @@ def create_training_config(name: str, models: list, strategies: list, use_gpu: b
     logger.info(f"Training configuration '{name}' created successfully")
 
 
+def run_classification_pipeline(threshold=0.3, strategy="simple_only", models=None, 
+                               use_gpu=False, config_path=None, use_parallel=None, 
+                               n_jobs=None, use_data_parallel=None, data_n_jobs=None):
+    """
+    Run the classification pipeline for magnesium level prediction.
+    
+    Args:
+        threshold: Classification threshold for magnesium levels (default: 0.3)
+        strategy: Feature engineering strategy
+        models: List of models to train
+        use_gpu: Whether to use GPU acceleration
+        config_path: Path to custom configuration file
+        use_parallel: Whether to use parallel feature processing
+        n_jobs: Number of jobs for feature processing
+        use_data_parallel: Whether to use parallel data processing
+        data_n_jobs: Number of jobs for data processing
+    """
+    logger.info("Starting CLASSIFICATION Pipeline")
+    logger.info(f"Classification threshold: {threshold}")
+    logger.info(f"Strategy: {strategy}")
+    logger.info(f"Models: {models}")
+    
+    # Setup
+    cfg = setup_pipeline_config(use_gpu=use_gpu, config_path=config_path)
+    run_data_preparation(cfg, use_data_parallel=use_data_parallel, data_n_jobs=data_n_jobs)
+    
+    # Load and prepare data
+    full_dataset, data_manager = load_and_clean_data(cfg)
+    train_df, test_df = data_manager.create_reproducible_splits(full_dataset)
+    
+    logger.info(f"Classification dataset prepared:")
+    logger.info(f"  Training samples: {len(train_df)}")
+    logger.info(f"  Test samples: {len(test_df)}")
+    
+    # Initialize classification trainer
+    from src.models.classification_trainer import ClassificationTrainer
+    trainer = ClassificationTrainer(cfg, strategy, threshold)
+    
+    # Filter models if specified
+    if models:
+        logger.info(f"Training selected models: {models}")
+    
+    # Train models
+    logger.info("Starting classification model training...")
+    results = trainer.train_models(train_df, test_df)
+    
+    # Create comparison report
+    comparison_df = trainer.create_comparison_report()
+    logger.info("\n" + "="*80)
+    logger.info("CLASSIFICATION MODEL COMPARISON")
+    logger.info("="*80)
+    print(comparison_df.to_string(index=False, float_format='%.4f'))
+    
+    # Get best model
+    try:
+        best_model_name, best_result = trainer.get_best_model(metric='f1')
+        logger.info(f"\nBest model by F1 score: {best_model_name}")
+        logger.info(f"Best F1 score: {best_result['test_metrics']['f1']:.4f}")
+        logger.info(f"Best model path: {best_result['model_path']}")
+    except Exception as e:
+        logger.warning(f"Could not determine best model: {e}")
+    
+    logger.info("\nClassification pipeline completed successfully!")
+
+
 def main():
     """Main entry point for the Magnesium Prediction ML Pipeline."""
     parser = argparse.ArgumentParser(description="Magnesium Prediction ML Pipeline")
@@ -1259,10 +1419,15 @@ def main():
     parent_parser.add_argument("--raw-spectral", action="store_true", help="Use raw spectral data (filtered by PeakRegions) instead of engineered features")
     parent_parser.add_argument("--validation-dir", type=str, help="Path to directory containing raw validation spectral files (.csv.txt)")
     parent_parser.add_argument("--config", type=str, help="Path to saved configuration file (.yaml)")
-    parent_parser.add_argument("--feature-parallel", action="store_true", help="Enable parallel processing for feature generation")
-    parent_parser.add_argument("--feature-n-jobs", type=int, default=-1, help="Number of parallel jobs for feature generation (-1 uses all cores, -2 uses all but one)")
-    parent_parser.add_argument("--data-parallel", action="store_true", help="Enable parallel processing for data averaging and cleansing")
-    parent_parser.add_argument("--data-n-jobs", type=int, default=-1, help="Number of parallel jobs for data operations (-1 uses all cores, -2 uses all but one)")
+    parent_parser.add_argument("--config-from-env", action="store_true", help="Load configuration from environment variables (CONFIG_*)")
+    parent_parser.add_argument("--config-json", type=str, help="Configuration as JSON string")
+    parent_parser.add_argument("--config-base64", type=str, help="Configuration as base64-encoded JSON string")
+    parent_parser.add_argument("--feature-parallel", action="store_true", help="Enable parallel processing for feature generation (overrides config)")
+    parent_parser.add_argument("--no-feature-parallel", action="store_true", help="Disable parallel processing for feature generation (overrides config)")
+    parent_parser.add_argument("--feature-n-jobs", type=int, help="Number of parallel jobs for feature generation (-1 uses all cores, overrides config)")
+    parent_parser.add_argument("--data-parallel", action="store_true", help="Enable parallel processing for data averaging and cleansing (overrides config)")
+    parent_parser.add_argument("--no-data-parallel", action="store_true", help="Disable parallel processing for data operations (overrides config)")
+    parent_parser.add_argument("--data-n-jobs", type=int, help="Number of parallel jobs for data operations (-1 uses all cores, overrides config)")
 
     # Train subparser with models selection
     parser_train = subparsers.add_parser("train", parents=[parent_parser], help="Run the standard model training pipeline.")
@@ -1278,13 +1443,13 @@ def main():
                                  help="Feature strategy to use (default: use strategies from config)")
     # Tune subparser with models selection
     parser_tune = subparsers.add_parser("tune", parents=[parent_parser], help="Run hyperparameter tuning for standard models.")
-    parser_tune.add_argument("--models", nargs="+", 
+    parser_tune.add_argument("--models", nargs="+", required=True,
                             choices=["ridge", "lasso", "random_forest", "xgboost", "lightgbm", "catboost", "extratrees", "neural_network", "neural_network_light", "svr"],
-                            help="Models to tune (default: use models from config)")
+                            help="Models to tune")
     
     # XGBoost Optimization subparser
     parser_optimize_xgboost = subparsers.add_parser("optimize-xgboost", parents=[parent_parser], help="Run dedicated XGBoost optimization")
-    parser_optimize_xgboost.add_argument("--strategy", type=str, default="full_context", 
+    parser_optimize_xgboost.add_argument("--strategy", type=str, default=None, 
                                        choices=["full_context", "simple_only", "Mg_only"],
                                        help="Feature strategy to use")
     parser_optimize_xgboost.add_argument("--trials", type=int, default=None, help="Number of optimization trials (default from config)")
@@ -1292,7 +1457,7 @@ def main():
     
     # AutoGluon Optimization subparser
     parser_optimize_autogluon = subparsers.add_parser("optimize-autogluon", parents=[parent_parser], help="Run dedicated AutoGluon optimization")
-    parser_optimize_autogluon.add_argument("--strategy", type=str, default="full_context", 
+    parser_optimize_autogluon.add_argument("--strategy", type=str, default=None, 
                                          choices=["full_context", "simple_only", "Mg_only"],
                                          help="Feature strategy to use")
     parser_optimize_autogluon.add_argument("--trials", type=int, default=None, help="Number of optimization trials (default from config)")
@@ -1303,11 +1468,22 @@ def main():
     parser_optimize_models.add_argument("--models", nargs="+", required=True,
                                       choices=["xgboost", "lightgbm", "catboost", "random_forest", "extratrees", "neural_network", "neural_network_light", "autogluon"],
                                       help="Models to optimize")
-    parser_optimize_models.add_argument("--strategy", type=str, default="full_context", 
+    parser_optimize_models.add_argument("--strategy", type=str, default=None, 
                                       choices=["full_context", "simple_only", "Mg_only"],
                                       help="Feature strategy to use")
     parser_optimize_models.add_argument("--trials", type=int, default=None, help="Number of optimization trials per model (default from config)")
     parser_optimize_models.add_argument("--timeout", type=int, default=None, help="Timeout in seconds per model (default from config)")
+
+    # Classification subparser
+    parser_classify = subparsers.add_parser("classify", parents=[parent_parser], help="Train classification models for magnesium threshold prediction")
+    parser_classify.add_argument("--threshold", type=float, default=0.3, help="Classification threshold for magnesium levels (default: 0.3)")
+    parser_classify.add_argument("--strategy", type=str, default="simple_only", 
+                               choices=["full_context", "simple_only", "Mg_only"],
+                               help="Feature strategy to use")
+    parser_classify.add_argument("--models", nargs="+", 
+                               choices=["logistic", "random_forest", "extratrees", "svm", "naive_bayes", "knn", "xgboost", "lightgbm", "catboost"],
+                               default=["logistic", "random_forest", "xgboost"],
+                               help="Classification models to train")
 
     # Range Specialist Neural Network Optimization subparser
     parser_range_specialist = subparsers.add_parser("optimize-range-specialist", parents=[parent_parser], help="Optimize neural network for 0.2-0.5%% magnesium range (target R² > 0.5)")
@@ -1364,10 +1540,56 @@ def main():
         use_raw_spectral = True if (hasattr(args, 'raw_spectral') and args.raw_spectral) else None
         validation_dir = getattr(args, 'validation_dir', None)
         config_path = getattr(args, 'config', None)
-        use_parallel = getattr(args, 'feature_parallel', False)
-        n_jobs = getattr(args, 'feature_n_jobs', -1)
-        use_data_parallel = getattr(args, 'data_parallel', False)
-        data_n_jobs = getattr(args, 'data_n_jobs', -1)
+        config_from_env = getattr(args, 'config_from_env', False)
+        config_json = getattr(args, 'config_json', None)
+        config_base64 = getattr(args, 'config_base64', None)
+        
+        # If config-from-env is specified, create a temporary config file from environment variables
+        if config_from_env:
+            config_path = create_config_from_env()
+        # If config-json is specified, create a temporary config file from JSON
+        elif config_json:
+            config_path = create_config_from_json(config_json)
+        # If config-base64 is specified, decode and create a temporary config file from JSON
+        elif config_base64:
+            config_path = create_config_from_base64(config_base64)
+        # Load config to get default parallel processing settings
+        if config_path:
+            temp_config = config_manager.load_config(config_path)
+            default_feature_parallel = temp_config.parallel.use_feature_parallel
+            default_data_parallel = temp_config.parallel.use_data_parallel
+            default_feature_n_jobs = temp_config.parallel.feature_n_jobs
+            default_data_n_jobs = temp_config.parallel.data_n_jobs
+        else:
+            default_feature_parallel = config.parallel.use_feature_parallel
+            default_data_parallel = config.parallel.use_data_parallel
+            default_feature_n_jobs = config.parallel.feature_n_jobs
+            default_data_n_jobs = config.parallel.data_n_jobs
+        
+        # Use command line arguments if explicitly provided, otherwise use config defaults
+        # Handle boolean flags with explicit enable/disable options
+        if getattr(args, 'feature_parallel', False):
+            use_parallel = True
+        elif getattr(args, 'no_feature_parallel', False):
+            use_parallel = False
+        else:
+            use_parallel = default_feature_parallel
+            
+        if getattr(args, 'data_parallel', False):
+            use_data_parallel = True
+        elif getattr(args, 'no_data_parallel', False):
+            use_data_parallel = False
+        else:
+            use_data_parallel = default_data_parallel
+        
+        # For numeric arguments, use provided value or config default
+        n_jobs = getattr(args, 'feature_n_jobs', None)
+        if n_jobs is None:
+            n_jobs = default_feature_n_jobs
+            
+        data_n_jobs = getattr(args, 'data_n_jobs', None)
+        if data_n_jobs is None:
+            data_n_jobs = default_data_n_jobs
         if args.stage == "train":
             models = getattr(args, 'models', None)
             strategy = getattr(args, 'strategy', None)
@@ -1411,7 +1633,9 @@ def main():
                 n_trials=args.trials,
                 timeout=args.timeout,
                 use_parallel=use_parallel,
-                n_jobs=n_jobs
+                n_jobs=n_jobs,
+                use_data_parallel=use_data_parallel,
+                data_n_jobs=data_n_jobs
             )
         elif args.stage == "optimize-range-specialist":
             run_range_specialist_pipeline(
@@ -1422,6 +1646,18 @@ def main():
                 n_trials=args.trials,
                 timeout=args.timeout,
                 use_pca=args.pca
+            )
+        elif args.stage == "classify":
+            run_classification_pipeline(
+                threshold=args.threshold,
+                strategy=args.strategy,
+                models=args.models,
+                use_gpu=use_gpu,
+                config_path=config_path,
+                use_parallel=use_parallel,
+                n_jobs=n_jobs,
+                use_data_parallel=use_data_parallel,
+                data_n_jobs=data_n_jobs
             )
         elif args.stage == "predict-single":
             run_single_prediction_pipeline(input_file=args.input_file, model_path=args.model_path)

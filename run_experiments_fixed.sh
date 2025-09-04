@@ -1,28 +1,20 @@
 #!/bin/bash
 
 # Fixed Comprehensive Experiment Script
-# Direct Vertex AI integration without problematic gcp_deploy.sh
+# Uses gcp_deploy.sh for prerequisite checks but handles Vertex AI deployment directly
 
 set -e
 
-# Configuration
-PROJECT_ID="${PROJECT_ID:-mapana-ai-models}"
-REGION="${REGION:-us-central1}"
-BUCKET_NAME="${BUCKET_NAME:-${PROJECT_ID}-magnesium-data}"
-REPO_NAME="${REPO_NAME:-magnesium-repo}"
-IMAGE_NAME="${IMAGE_NAME:-magnesium-pipeline}"
-SERVICE_NAME="${SERVICE_NAME:-magnesium-pipeline}"
+# Colors and logging functions
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
 
 # Results tracking
 RESULTS_DIR="./experiment_results"
 LOGS_DIR="./experiment_logs"
 mkdir -p "$RESULTS_DIR" "$LOGS_DIR"
-
-# Colors
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1" | tee -a "$LOGS_DIR/main.log"
@@ -35,6 +27,45 @@ log_warn() {
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOGS_DIR/main.log"
 }
+
+# Load configuration from staging config
+STAGING_CONFIG="/home/payanico/magnesium_pipeline/config/staging_config.yml"
+
+# Parse YAML configuration (simple parser for this config structure)
+parse_staging_config() {
+    if [ ! -f "$STAGING_CONFIG" ]; then
+        log_error "Staging config not found: $STAGING_CONFIG"
+        exit 1
+    fi
+    
+    log_info "Loading configuration from: $STAGING_CONFIG"
+    
+    # Parse the staging config YAML file - specifically from GCP section
+    PROJECT_ID=$(grep -A 10 "gcp:" "$STAGING_CONFIG" | grep "project_id:" | head -1 | sed 's/.*project_id: *"\?//' | sed 's/"\? *#.*//' | sed 's/"\?$//')
+    REGION=$(grep -A 10 "gcp:" "$STAGING_CONFIG" | grep "region:" | head -1 | sed 's/.*region: *"\?//' | sed 's/"\? *#.*//' | sed 's/"\?$//')
+    BUCKET_NAME=$(grep "bucket_name:" "$STAGING_CONFIG" | sed 's/.*bucket_name: *"\?//' | sed 's/"\? *#.*//' | sed 's/"\?$//')
+    CLOUD_STORAGE_PREFIX=$(grep "prefix:" "$STAGING_CONFIG" | sed 's/.*prefix: *"\?//' | sed 's/"\? *#.*//' | sed 's/"\?$//')
+    
+    # Use defaults if not found in config
+    PROJECT_ID="${PROJECT_ID:-mapana-ai-models}"
+    REGION="${REGION:-us-central1}"
+    BUCKET_NAME="${BUCKET_NAME:-staging-magnesium-data}"
+    CLOUD_STORAGE_PREFIX="${CLOUD_STORAGE_PREFIX:-magnesium-pipeline-staging}"
+    
+    log_info "Configuration loaded:"
+    log_info "  PROJECT_ID: $PROJECT_ID"
+    log_info "  REGION: $REGION"
+    log_info "  BUCKET_NAME: $BUCKET_NAME"
+    log_info "  CLOUD_STORAGE_PREFIX: $CLOUD_STORAGE_PREFIX"
+}
+
+# Parse configuration first
+parse_staging_config
+
+# Configuration (loaded from staging config)
+REPO_NAME="${REPO_NAME:-magnesium-repo}"
+IMAGE_NAME="${IMAGE_NAME:-magnesium-pipeline}"
+SERVICE_NAME="${SERVICE_NAME:-magnesium-pipeline}"
 
 generate_experiment_id() {
     echo "exp_$(date +%Y%m%d_%H%M%S)_$$"
@@ -106,8 +137,8 @@ submit_vertex_job() {
         "env": [
           {"name": "STORAGE_TYPE", "value": "gcs"},
           {"name": "STORAGE_BUCKET_NAME", "value": "$BUCKET_NAME"},
-          {"name": "CLOUD_STORAGE_PREFIX", "value": "magnesium-pipeline"},
-          {"name": "ENVIRONMENT", "value": "production"},
+          {"name": "CLOUD_STORAGE_PREFIX", "value": "$CLOUD_STORAGE_PREFIX"},
+          {"name": "ENVIRONMENT", "value": "staging"},
           {"name": "PYTHONPATH", "value": "/app"}
         ]
       }
@@ -144,17 +175,76 @@ EOF
     fi
 }
 
-# Check prerequisites and setup
-setup_environment() {
-    log_info "Setting up environment..."
+# Check prerequisites using gcp_deploy.sh
+check_prerequisites() {
+    log_info "Checking prerequisites using gcp_deploy.sh..."
     
-    if ! command -v gcloud &> /dev/null; then
-        log_error "gcloud CLI not found"
+    local deploy_script="./deploy/gcp_deploy.sh"
+    
+    if [ ! -f "$deploy_script" ]; then
+        log_error "gcp_deploy.sh not found at $deploy_script"
         exit 1
     fi
     
-    # Set project
-    gcloud config set project "$PROJECT_ID"
+    log_info "=== Running Prerequisites Checks ==="
+    
+    # 1. Basic prerequisites check (gcloud, docker, auth) - do this directly
+    log_info "Checking basic prerequisites..."
+    
+    if ! command -v gcloud &> /dev/null; then
+        log_error "gcloud CLI is not installed. Please install it first."
+        exit 1
+    fi
+    
+    if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" | grep -q .; then
+        log_error "Not logged into gcloud. Run: gcloud auth login"
+        exit 1
+    fi
+    
+    if ! command -v docker &> /dev/null; then
+        log_error "Docker is not installed. Please install it first."
+        exit 1
+    fi
+    
+    log_info "Basic prerequisites check passed!"
+    
+    # 2. Set the project
+    log_info "Setting GCP project to: $PROJECT_ID"
+    gcloud config set project "$PROJECT_ID" --quiet
+    
+    # 3. Check if container image exists
+    local image_uri="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${IMAGE_NAME}:latest"
+    log_info "Checking if container image exists: ${image_uri}"
+    
+    if gcloud artifacts docker images describe "${image_uri}" --quiet &>/dev/null; then
+        log_info "Container image found: ${image_uri}"
+    else
+        log_error "Container image not found: ${image_uri}"
+        log_error "Please build and push the Docker image first using:"
+        log_error "  ./deploy/gcp_deploy.sh build-image"
+        exit 1
+    fi
+    
+    # 4. Check if training data exists in GCS
+    log_info "Checking if training data exists in GCS bucket..."
+    local bucket_prefix="${CLOUD_STORAGE_PREFIX:-magnesium-pipeline-staging}"
+    local required_path="gs://${BUCKET_NAME}/${bucket_prefix}/data_5278_Phase3/"
+    
+    if gsutil ls "${required_path}" &>/dev/null; then
+        log_info "Training data found: ${required_path}"
+    else
+        log_error "Training data not found: ${required_path}"
+        log_error "Please upload training data first using:"
+        log_error "  ./deploy/gcp_deploy.sh upload-data"
+        exit 1
+    fi
+    
+    log_info "=== All Prerequisites Passed! ==="
+}
+
+# Setup environment after prerequisites check
+setup_environment() {
+    log_info "Setting up experiment environment..."
     
     # Initialize tracker
     if [ ! -f "$RESULTS_DIR/tracker.csv" ]; then
@@ -282,6 +372,10 @@ main() {
     log_info "Starting Fixed Experiment Runner"
     log_info "Project: $PROJECT_ID | Region: $REGION"
     
+    # Check all prerequisites first
+    check_prerequisites
+    
+    # Setup experiment environment
     setup_environment
     
     case "${1:-quick}" in

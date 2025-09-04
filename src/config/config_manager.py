@@ -7,11 +7,12 @@ for training and fine-tuning experiments.
 import json
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 import logging
 from dataclasses import asdict
 
+from pydantic import BaseModel
 from .pipeline_config import Config, ModelParamsConfig, TunerConfig, AutoGluonConfig, ObjectiveConfig
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ class ConfigManager:
         logger.info(f"Configuration saved to: {config_path}")
         return config_path
     
-    def load_config(self, config_path: Path) -> Dict[str, Any]:
+    def load_config(self, config_path: Union[str, Path]) -> Dict[str, Any]:
         """
         Load a configuration from disk.
         
@@ -69,6 +70,7 @@ class ConfigManager:
         Returns:
             Configuration dictionary
         """
+        config_path = Path(config_path)
         if not config_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
             
@@ -229,19 +231,68 @@ class ConfigManager:
                     self._convert_paths_to_strings(item)
     
     def _merge_configs(self, base_config: Config, stored_config: Dict[str, Any]) -> Config:
-        """Merge stored configuration into base configuration."""
+        """Merge stored configuration into base configuration with proper nested handling."""
         import copy
+        
         merged_config = copy.deepcopy(base_config)
         
-        # Update simple fields
+        # Define known nested config fields
+        nested_configs = {
+            'model_params': 'ModelParamsConfig',
+            'autogluon': 'AutoGluonConfig', 
+            'tuner': 'TunerConfig',
+            'dimension_reduction': 'DimensionReductionConfig'
+        }
+        
         for key, value in stored_config.items():
-            if hasattr(merged_config, key) and not key.startswith('_'):
-                try:
+            if not hasattr(merged_config, key) or key.startswith('_'):
+                continue
+                
+            try:
+                current_attr = getattr(merged_config, key)
+                
+                # Handle nested config objects
+                if key in nested_configs and isinstance(value, dict) and isinstance(current_attr, BaseModel):
+                    logger.debug(f"Merging nested config: {key}")
+                    merged_nested = self._merge_nested_config(current_attr, value)
+                    setattr(merged_config, key, merged_nested)
+                else:
+                    # Handle simple fields
                     setattr(merged_config, key, value)
-                except Exception as e:
-                    logger.warning(f"Failed to set {key}={value}: {e}")
+                    logger.debug(f"Set config field: {key}={value}")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to set {key}={value}: {e}")
         
         return merged_config
+    
+    def _merge_nested_config(self, base_nested: BaseModel, stored_nested: Dict[str, Any]) -> BaseModel:
+        """Merge nested configuration objects."""
+        import copy
+        
+        # Create a copy of the base nested config
+        merged_nested = copy.deepcopy(base_nested)
+        
+        # Update fields in the nested config
+        for nested_key, nested_value in stored_nested.items():
+            if hasattr(merged_nested, nested_key):
+                try:
+                    current_nested_attr = getattr(merged_nested, nested_key)
+                    
+                    # Check for further nesting (like tuner.objectives)
+                    if isinstance(nested_value, dict) and isinstance(current_nested_attr, BaseModel):
+                        # Recursively merge further nested objects
+                        further_merged = self._merge_nested_config(current_nested_attr, nested_value)
+                        setattr(merged_nested, nested_key, further_merged)
+                        logger.debug(f"Merged further nested config: {nested_key}")
+                    else:
+                        setattr(merged_nested, nested_key, nested_value)
+                        logger.debug(f"Set nested field: {nested_key}={nested_value}")
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to set nested {nested_key}={nested_value}: {e}")
+        
+        return merged_nested
     
     def _apply_overrides(self, config: Config, overrides: Dict[str, Any]) -> Config:
         """Apply override parameters to configuration."""

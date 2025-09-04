@@ -1,0 +1,30 @@
+# Generated AutoGluon Configuration for Magnesium Prediction
+# Experiment: ag_20250902_174035_417568
+# Target: R² ≥ 0.8, MAPE < 10%, MAE < 0.05
+
+# AutoGluon Configuration
+autogluon:
+  presets: "best_quality"
+  time_limit: 14400
+  num_bag_folds: 5
+  num_bag_sets: 3
+  num_stack_levels: 2
+  auto_stack: true
+
+# Feature Engineering Configuration
+enable_molecular_bands: false
+enable_macro_elements: true
+enable_micro_elements: true
+enable_oxygen_hydrogen: false
+enable_advanced_ratios: true
+enable_spectral_patterns: true
+use_focused_magnesium_features: true
+
+# Sample Weighting Configuration
+use_sample_weights: true
+weight_method: "improved"
+use_concentration_features: true
+use_data_driven_thresholds: true
+
+# Dimensionality Reduction Configuration
+use_dimension_reduction: false

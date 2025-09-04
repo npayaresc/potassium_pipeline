@@ -72,7 +72,8 @@ def generate_high_magnesium_features(df: pd.DataFrame, simple_feature_names: Lis
     This logic is adapted from the original _generate_high_nitrogen_features.
     """
     df_out = df.copy()
-    enhanced_features = pd.DataFrame(index=df_out.index)
+    index_to_use = df_out.index if hasattr(df_out, 'index') else None
+    enhanced_features = pd.DataFrame(index=index_to_use)
     enhanced_feature_names = []
     
     # Apply reasonable bounds to PC_ratio to prevent extreme values
@@ -134,7 +135,8 @@ def generate_focused_magnesium_features(df: pd.DataFrame, simple_feature_names: 
     Only includes features directly relevant to magnesium detection and quantification.
     """
     df_out = df.copy()
-    enhanced_features = pd.DataFrame(index=df_out.index)
+    index_to_use = df_out.index if hasattr(df_out, 'index') else None
+    enhanced_features = pd.DataFrame(index=index_to_use)
     enhanced_feature_names = []
     
     # M/C ratio transformations - fundamental for magnesium analysis

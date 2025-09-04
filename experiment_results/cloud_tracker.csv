@@ -1,1 +1,2 @@
 experiment,timestamp,job_id,status,mode,strategy,models
+exp_20250901_123541_984128,Mo 1. Sep 12:35:59 WEST 2025,,FAILED,train,Mg_only,xgboost,lightgbm,catboost

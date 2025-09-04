@@ -222,3 +222,212 @@ or continue streaming the logs with the command
 
   $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/7798544416255246336
 projects/586323113169/locations/us-central1/customJobs/7798544416255246336,SUCCESS,autogluon,full_context,
+exp_20250902_164712_354560,Di 2. Sep 16:47:14 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/7964200136630861824] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/7964200136630861824
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/7964200136630861824
+projects/586323113169/locations/us-central1/customJobs/7964200136630861824,SUCCESS,autogluon,simple_only,
+exp_20250902_164724_354560,Di 2. Sep 16:47:26 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/4088289707325128704] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/4088289707325128704
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/4088289707325128704
+projects/586323113169/locations/us-central1/customJobs/4088289707325128704,SUCCESS,optimize-xgboost,full_context,
+exp_20250902_164736_354560,Di 2. Sep 16:47:38 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/8028376431320891392] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/8028376431320891392
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/8028376431320891392
+projects/586323113169/locations/us-central1/customJobs/8028376431320891392,SUCCESS,train,simple_only,xgboost,lightgbm,catboost
+exp_20250902_164748_354560,Di 2. Sep 16:47:50 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/3605841597243064320] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/3605841597243064320
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/3605841597243064320
+projects/586323113169/locations/us-central1/customJobs/3605841597243064320,SUCCESS,train,full_context,neural_network
+exp_20250902_164800_354560,Di 2. Sep 16:48:02 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/4795354848822296576] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/4795354848822296576
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/4795354848822296576
+projects/586323113169/locations/us-central1/customJobs/4795354848822296576,SUCCESS,tune,simple_only,
+exp_20250902_164832_354560,Di 2. Sep 16:48:34 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/5650475828069269504] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/5650475828069269504
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/5650475828069269504
+projects/586323113169/locations/us-central1/customJobs/5650475828069269504,SUCCESS,train,Mg_only,xgboost,lightgbm
+exp_20250902_164839_354560,Di 2. Sep 16:48:41 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/2288538706237194240] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/2288538706237194240
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/2288538706237194240
+projects/586323113169/locations/us-central1/customJobs/2288538706237194240,SUCCESS,autogluon,Mg_only,
+exp_20250902_164851_354560,Di 2. Sep 16:48:53 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/1052863558477414400] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/1052863558477414400
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/1052863558477414400
+projects/586323113169/locations/us-central1/customJobs/1052863558477414400,SUCCESS,train,simple_only,xgboost,lightgbm
+exp_20250902_164858_354560,Di 2. Sep 16:49:00 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/5574477584357392384] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/5574477584357392384
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/5574477584357392384
+projects/586323113169/locations/us-central1/customJobs/5574477584357392384,SUCCESS,autogluon,simple_only,
+exp_20250902_164910_354560,Di 2. Sep 16:49:12 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/2646574876613148672] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/2646574876613148672
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/2646574876613148672
+projects/586323113169/locations/us-central1/customJobs/2646574876613148672,SUCCESS,train,full_context,xgboost,lightgbm
+exp_20250902_164917_354560,Di 2. Sep 16:49:19 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/1558955566603173888] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/1558955566603173888
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/1558955566603173888
+projects/586323113169/locations/us-central1/customJobs/1558955566603173888,SUCCESS,autogluon,full_context,
+exp_20250902_164959_354560,Di 2. Sep 16:50:01 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/7062354311249920000] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/7062354311249920000
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/7062354311249920000
+projects/586323113169/locations/us-central1/customJobs/7062354311249920000,SUCCESS,optimize-xgboost,simple_only,
+exp_20250902_165011_354560,Di 2. Sep 16:50:13 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/6450990661834375168] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/6450990661834375168
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/6450990661834375168
+projects/586323113169/locations/us-central1/customJobs/6450990661834375168,SUCCESS,optimize-models,simple_only,xgboost,lightgbm,catboost
+exp_20250902_165023_354560,Di 2. Sep 16:50:25 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/5877907609251479552] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/5877907609251479552
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/5877907609251479552
+projects/586323113169/locations/us-central1/customJobs/5877907609251479552,SUCCESS,optimize-xgboost,full_context,
+exp_20250902_165035_354560,Di 2. Sep 16:50:37 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/1619754161572675584] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/1619754161572675584
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/1619754161572675584
+projects/586323113169/locations/us-central1/customJobs/1619754161572675584,SUCCESS,optimize-models,full_context,xgboost,lightgbm,catboost
+exp_20250902_165117_354560,Di 2. Sep 16:51:20 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/6848433328949821440] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/6848433328949821440
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/6848433328949821440
+projects/586323113169/locations/us-central1/customJobs/6848433328949821440,SUCCESS,autogluon,simple_only,
+exp_20250902_165135_354560,Di 2. Sep 16:51:37 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/4511065122344534016] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/4511065122344534016
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/4511065122344534016
+projects/586323113169/locations/us-central1/customJobs/4511065122344534016,SUCCESS,autogluon,simple_only,
+exp_20250902_165152_354560,Di 2. Sep 16:51:54 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/104292886962503680] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/104292886962503680
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/104292886962503680
+projects/586323113169/locations/us-central1/customJobs/104292886962503680,SUCCESS,autogluon,full_context,
+exp_20250902_165209_354560,Di 2. Sep 16:52:11 WEST 2025,Using endpoint [https://us-central1-aiplatform.googleapis.com/]
+CustomJob [projects/586323113169/locations/us-central1/customJobs/2835726060962709504] is submitted successfully.
+
+Your job is still active. You may view the status of your job with the command
+
+  $ gcloud ai custom-jobs describe projects/586323113169/locations/us-central1/customJobs/2835726060962709504
+
+or continue streaming the logs with the command
+
+  $ gcloud ai custom-jobs stream-logs projects/586323113169/locations/us-central1/customJobs/2835726060962709504
+projects/586323113169/locations/us-central1/customJobs/2835726060962709504,SUCCESS,autogluon,full_context,

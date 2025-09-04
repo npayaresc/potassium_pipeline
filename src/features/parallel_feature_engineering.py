@@ -191,11 +191,17 @@ class ParallelSpectralFeatureGenerator(BaseEstimator, TransformerMixin):
                     results.append({'idx': idx, 'features': {}})
         
         # Sort results by index to maintain original order
-        results.sort(key=lambda x: X.index.get_loc(x['idx']))
+        if hasattr(X, 'index'):
+            try:
+                results.sort(key=lambda x: X.index.get_loc(x['idx']))
+            except (KeyError, ValueError):
+                # If index sorting fails, maintain original order
+                pass
         
         # Extract features from results
         base_features_list = [r['features'] for r in results]
-        base_features_df = pd.DataFrame(base_features_list, index=X.index)
+        index_to_use = X.index if hasattr(X, 'index') else None
+        base_features_df = pd.DataFrame(base_features_list, index=index_to_use)
         
         # Calculate P/C ratio
         m_area = (
@@ -236,7 +242,9 @@ class ParallelSpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         final_df = full_features_df.reindex(
             columns=expected_features, fill_value=np.nan
         )
-        final_df.index = X.index
+        # Ensure the final dataframe maintains the original index
+        if hasattr(X, 'index'):
+            final_df.index = X.index
         
         logger.info(
             f"Parallel transformation complete: {final_df.shape[1]} features for strategy '{self.strategy}'."
@@ -270,8 +278,9 @@ class ParallelSpectralFeatureGenerator(BaseEstimator, TransformerMixin):
             ])
         
         # Extract a sample to determine high_p_names dynamically
+        sample_idx = X_sample.index[0] if hasattr(X_sample, 'index') else 0
         sample_features = _extract_features_for_row((
-            X_sample.index[0],
+            sample_idx,
             X_sample.iloc[0]["wavelengths"],
             X_sample.iloc[0]["intensities"],
             self.config.model_dump(),

@@ -1,5 +1,5 @@
 """
-Main Orchestration Script for the Magnesium Prediction Pipeline.
+Main Orchestration Script for the Potassium Prediction Pipeline.
 
 This script serves as the entry point to run different stages of the ML pipeline,
 including data preparation, standard training, AutoGluon training, hyperparameter
@@ -114,6 +114,7 @@ from src.models.optimize_range_specialist_neural_net import RangeSpecialistOptim
 from src.reporting.reporter import Reporter
 from src.utils.helpers import calculate_regression_metrics, setup_logging
 from src.utils.custom_exceptions import DataValidationError, PipelineError
+from src.analysis.mislabel_detector import MislabelDetector
 
 
 
@@ -230,8 +231,15 @@ def run_data_preparation(cfg: Config, use_data_parallel: bool = False, data_n_jo
     else:
         data_manager.average_raw_files()
 
-def load_and_clean_data(cfg: Config, use_data_parallel: bool = False, data_n_jobs: int = -1) -> Tuple[pd.DataFrame, DataManager]:
-    """Loads averaged data, cleans it, saves the clean version, and moves bad files."""
+def load_and_clean_data(cfg: Config, use_data_parallel: bool = False, data_n_jobs: int = -1, exclude_suspects_file: Optional[str] = None) -> Tuple[pd.DataFrame, DataManager]:
+    """Loads averaged data, cleans it, saves the clean version, and moves bad files.
+
+    Args:
+        cfg: Pipeline configuration
+        use_data_parallel: Enable parallel processing for data operations
+        data_n_jobs: Number of parallel jobs (-1 uses all cores)
+        exclude_suspects_file: Path to CSV file containing sample IDs to exclude
+    """
     data_manager = DataManager(cfg)
     metadata = data_manager.load_and_prepare_metadata()
     training_files = data_manager.get_training_data_paths()
@@ -300,9 +308,68 @@ def load_and_clean_data(cfg: Config, use_data_parallel: bool = False, data_n_job
     
     if not processed_data_for_training:
         raise DataValidationError("No data left after cleansing. Aborting pipeline.")
-    
+
     logger.info(f"Data cleaning complete. {len(processed_data_for_training)} files are ready for training.")
-    return pd.DataFrame(processed_data_for_training), data_manager
+
+    # Exclude suspicious samples if specified (before DataFrame conversion to avoid corruption)
+    if exclude_suspects_file:
+        logger.info("=" * 80)
+        logger.info("SAMPLE EXCLUSION PROCESS")
+        logger.info("=" * 80)
+        logger.info(f"Exclusion file specified: {exclude_suspects_file}")
+
+        if Path(exclude_suspects_file).exists():
+            try:
+                suspects_df = pd.read_csv(exclude_suspects_file)
+                logger.info(f"Loaded exclusion file with {len(suspects_df)} entries")
+
+                if 'sample_id' in suspects_df.columns:
+                    suspects_to_exclude = set(suspects_df['sample_id'].astype(str))
+                    initial_count = len(processed_data_for_training)
+                    logger.info(f"Initial sample count (before exclusion): {initial_count}")
+                    logger.info(f"Number of unique samples to exclude: {len(suspects_to_exclude)}")
+
+                    # Filter the list directly to avoid DataFrame corruption of numpy arrays
+                    filtered_data = []
+                    excluded_samples = []
+                    for sample_data in processed_data_for_training:
+                        sample_id = sample_data[cfg.sample_id_column]
+                        if sample_id not in suspects_to_exclude:
+                            filtered_data.append(sample_data)
+                        else:
+                            excluded_samples.append(sample_id)
+
+                    processed_data_for_training = filtered_data
+                    excluded_count = initial_count - len(processed_data_for_training)
+
+                    logger.info(f"Actually excluded: {excluded_count} samples")
+                    logger.info(f"Final sample count (after exclusion): {len(processed_data_for_training)}")
+
+                    if excluded_count > 0:
+                        logger.info(f"Examples of excluded samples: {excluded_samples[:5]}")
+
+                    # Calculate percentage
+                    exclusion_percentage = (excluded_count / initial_count) * 100 if initial_count > 0 else 0
+                    logger.info(f"Exclusion percentage: {exclusion_percentage:.1f}%")
+                    logger.info("=" * 80)
+
+                    # Validate that we still have data
+                    if len(processed_data_for_training) == 0:
+                        raise DataValidationError("No samples remaining after exclusion. Check your exclusion file.")
+
+                else:
+                    logger.warning(f"Exclusion file {exclude_suspects_file} does not have 'sample_id' column. Skipping exclusion.")
+            except Exception as e:
+                logger.error(f"Failed to load exclusion file {exclude_suspects_file}: {e}")
+        else:
+            logger.warning(f"Exclusion file not found: {exclude_suspects_file}")
+    else:
+        logger.info("No sample exclusion file specified - using all available samples")
+
+    # Convert to DataFrame after filtering to preserve data integrity
+    df = pd.DataFrame(processed_data_for_training)
+
+    return df, data_manager
 
 def process_validation_data(cfg: Config, validation_dir: Path, global_data_manager: Optional[DataManager] = None) -> pd.DataFrame:
     """Process raw validation files through averaging and cleansing."""
@@ -386,37 +453,53 @@ def process_validation_data(cfg: Config, validation_dir: Path, global_data_manag
     
     return pd.DataFrame(processed_validation_data)
 
-def run_training_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False, 
-                          validation_dir: Optional[str] = None, 
+def run_training_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False,
+                          validation_dir: Optional[str] = None,
                           config_path: Optional[str] = None,
                           models: Optional[list] = None,
                           strategy: Optional[str] = None,
                           use_parallel: bool = False,
                           n_jobs: int = -1,
                           use_data_parallel: bool = False,
-                          data_n_jobs: int = -1):
+                          data_n_jobs: int = -1,
+                          exclude_suspects_file: Optional[str] = None,
+                          shap_features_file: Optional[str] = None,
+                          shap_top_n: int = 30,
+                          shap_min_importance: Optional[float] = None):
     """Executes the standard model training pipeline."""
     cfg = setup_pipeline_config(use_gpu, use_raw_spectral, validation_dir, config_path)
-    
+
     # Override models if specified via command line
     if models:
         cfg.models_to_train = models
         logger.info(f"Using models from command line: {models}")
     else:
         logger.info(f"Using models from config: {cfg.models_to_train}")
-    
+
     # Override strategy if specified via command line
     if strategy:
         cfg.feature_strategies = [strategy]
         logger.info(f"Using strategy from command line: {strategy}")
     else:
         logger.info(f"Using feature strategies from config: {cfg.feature_strategies}")
+
+    # Configure SHAP-based feature selection if specified
+    if shap_features_file:
+        cfg.use_shap_feature_selection = True
+        cfg.shap_importance_file = shap_features_file
+        cfg.shap_top_n_features = shap_top_n
+        cfg.shap_min_importance = shap_min_importance
+        logger.info(f"[SHAP FEATURE SELECTION] Enabled via command line:")
+        logger.info(f"  - SHAP file: {shap_features_file}")
+        logger.info(f"  - Top N: {shap_top_n}")
+        if shap_min_importance:
+            logger.info(f"  - Min importance: {shap_min_importance}")
     
     logger.info(f"Starting standard training run: {cfg.run_timestamp}")
     
     run_data_preparation(cfg, use_data_parallel, data_n_jobs)
     reporter = Reporter(cfg)
-    full_dataset, global_data_manager = load_and_clean_data(cfg, use_data_parallel, data_n_jobs)
+    full_dataset, global_data_manager = load_and_clean_data(cfg, use_data_parallel, data_n_jobs, exclude_suspects_file)
     
     # Use either the passed validation_dir or the one from config
     validation_directory = validation_dir or cfg.custom_validation_dir
@@ -483,13 +566,17 @@ def run_autogluon_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False
                            use_parallel: bool = False,
                            n_jobs: int = -1,
                            use_data_parallel: bool = False,
-                           data_n_jobs: int = -1):
+                           data_n_jobs: int = -1,
+                           exclude_suspects_file: Optional[str] = None,
+                           shap_features_file: Optional[str] = None,
+                           shap_top_n: Optional[int] = None,
+                           shap_min_importance: Optional[float] = None):
     """Executes the dedicated AutoGluon training pipeline."""
     cfg = setup_pipeline_config(use_gpu, use_raw_spectral, validation_dir, config_path)
     logger.info(f"Starting AutoGluon training run: {cfg.run_timestamp}")
     reporter = Reporter(cfg)
     run_data_preparation(cfg, use_data_parallel, data_n_jobs)
-    full_dataset, global_data_manager = load_and_clean_data(cfg, use_data_parallel, data_n_jobs)
+    full_dataset, global_data_manager = load_and_clean_data(cfg, use_data_parallel, data_n_jobs, exclude_suspects_file)
     
     # Use either the passed validation_dir or the one from config
     validation_directory = validation_dir or cfg.custom_validation_dir
@@ -539,13 +626,38 @@ def run_autogluon_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False
         display_strategy = get_display_strategy_name(strategy_for_autogluon, cfg.use_raw_spectral_data)
         logger.info(f"No feature strategies in config, defaulting to '{display_strategy}' for AutoGluon.")
     
+    # Use command-line SHAP parameters if provided, otherwise use config values
+    effective_shap_file = shap_features_file or (cfg.shap_importance_file if cfg.use_shap_feature_selection else None)
+    effective_shap_top_n = shap_top_n if shap_top_n is not None else cfg.shap_top_n_features
+    effective_shap_min_importance = shap_min_importance if shap_min_importance is not None else cfg.shap_min_importance
+
+    if effective_shap_file:
+        # Check if file exists
+        shap_file_path = Path(effective_shap_file)
+        if not shap_file_path.exists():
+            logger.warning(f"⚠️  SHAP file specified in config does not exist: {effective_shap_file}")
+            logger.warning(f"   SHAP feature selection will be DISABLED for this run")
+            logger.warning(f"   To fix: Update shap_importance_file in pipeline_config.py or run SHAP analysis first")
+            effective_shap_file = None
+        else:
+            logger.info("="*80)
+            logger.info("SHAP FEATURE SELECTION ENABLED (from config)")
+            logger.info("="*80)
+            logger.info(f"  File: {effective_shap_file}")
+            logger.info(f"  Top N: {effective_shap_top_n}")
+            logger.info(f"  Min importance: {effective_shap_min_importance}")
+            logger.info("="*80)
+
     trainer = AutoGluonTrainer(
-        config=cfg, 
-        strategy=strategy_for_autogluon, 
+        config=cfg,
+        strategy=strategy_for_autogluon,
         reporter=reporter,
         use_concentration_features=cfg.use_concentration_features,
         use_parallel_features=use_parallel,
-        feature_n_jobs=n_jobs
+        feature_n_jobs=n_jobs,
+        shap_features_file=effective_shap_file,
+        shap_top_n=effective_shap_top_n,
+        shap_min_importance=effective_shap_min_importance
     )
     trainer.train_and_evaluate(train_df, test_df)
     
@@ -562,7 +674,8 @@ def run_autogluon_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False
 def run_tuning_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False,
                         validation_dir: Optional[str] = None,
                         config_path: Optional[str] = None,
-                        models: Optional[list] = None):
+                        models: Optional[list] = None,
+                        exclude_suspects_file: Optional[str] = None):
     """Executes the hyperparameter tuning pipeline."""
     cfg = setup_pipeline_config(use_gpu, use_raw_spectral, validation_dir, config_path)
     
@@ -577,7 +690,7 @@ def run_tuning_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False,
     
     run_data_preparation(cfg)
     reporter = Reporter(cfg)
-    full_dataset, global_data_manager = load_and_clean_data(cfg)
+    full_dataset, global_data_manager = load_and_clean_data(cfg, exclude_suspects_file=exclude_suspects_file)
     
     # Use either the passed validation_dir or the one from config
     validation_directory = validation_dir or cfg.custom_validation_dir
@@ -630,7 +743,8 @@ def run_tuning_pipeline(use_gpu: bool = False, use_raw_spectral: bool = False,
 def run_xgboost_optimization_pipeline(use_gpu: bool = False, validation_dir: Optional[str] = None,
                                      config_path: Optional[str] = None, strategy: Optional[str] = None,
                                      n_trials: Optional[int] = None, timeout: Optional[int] = None,
-                                     use_parallel: bool = False, n_jobs: int = -1):
+                                     use_parallel: bool = False, n_jobs: int = -1,
+                                     exclude_suspects_file: Optional[str] = None):
     """Executes dedicated XGBoost optimization pipeline."""
     cfg = setup_pipeline_config(use_gpu, validation_dir, config_path)
     
@@ -656,7 +770,7 @@ def run_xgboost_optimization_pipeline(use_gpu: bool = False, validation_dir: Opt
     logger.info(f"Starting XGBoost optimization run: {cfg.run_timestamp}")
     
     run_data_preparation(cfg)
-    full_dataset, global_data_manager = load_and_clean_data(cfg)
+    full_dataset, global_data_manager = load_and_clean_data(cfg, exclude_suspects_file=exclude_suspects_file)
     
     # Use either the passed validation_dir or the one from config
     validation_directory = validation_dir or cfg.custom_validation_dir
@@ -777,7 +891,8 @@ def run_xgboost_optimization_pipeline(use_gpu: bool = False, validation_dir: Opt
 def run_autogluon_optimization_pipeline(use_gpu: bool = False, validation_dir: Optional[str] = None,
                                        config_path: Optional[str] = None, strategy: Optional[str] = None,
                                        n_trials: Optional[int] = None, timeout: Optional[int] = None,
-                                       use_parallel: bool = False, n_jobs: int = -1):
+                                       use_parallel: bool = False, n_jobs: int = -1,
+                                       exclude_suspects_file: Optional[str] = None):
     """Executes dedicated AutoGluon optimization pipeline."""
     from src.models.optimize_autogluon import AutoGluonOptimizer
     
@@ -806,7 +921,7 @@ def run_autogluon_optimization_pipeline(use_gpu: bool = False, validation_dir: O
     logger.info(f"Starting AutoGluon optimization run: {cfg.run_timestamp}")
     
     run_data_preparation(cfg)
-    full_dataset, global_data_manager = load_and_clean_data(cfg)
+    full_dataset, global_data_manager = load_and_clean_data(cfg, exclude_suspects_file=exclude_suspects_file)
     
     # Use either the passed validation_dir or the one from config
     validation_directory = validation_dir or cfg.custom_validation_dir
@@ -931,33 +1046,59 @@ def run_model_optimization_pipeline(model_names: list, use_gpu: bool = False, us
                                    config_path: Optional[str] = None, strategy: Optional[str] = None,
                                    n_trials: Optional[int] = None, timeout: Optional[int] = None,
                                    use_parallel: bool = False, n_jobs: int = -1,
-                                   use_data_parallel: bool = False, data_n_jobs: int = -1):
+                                   use_data_parallel: bool = False, data_n_jobs: int = -1,
+                                   exclude_suspects_file: Optional[str] = None,
+                                   shap_features_file: Optional[str] = None,
+                                   shap_top_n: int = 30,
+                                   shap_min_importance: Optional[float] = None):
     """Executes optimization for specified models."""
-    cfg = setup_pipeline_config(use_gpu, use_raw_spectral, validation_dir, config_path)
-    
+
+    # Determine the strategy first to override raw spectral mode if needed
+    temp_cfg = setup_pipeline_config(use_gpu, use_raw_spectral, validation_dir, config_path)
+    if strategy is None:
+        strategy = temp_cfg.feature_strategies[0] if temp_cfg.feature_strategies else "simple_only"
+        logger.info(f"Using strategy from config: {strategy}")
+    else:
+        logger.info(f"Using strategy from command line: {strategy}")
+
+    # Override raw spectral mode for traditional feature engineering strategies
+    if strategy in ["simple_only", "full_context", "K_only"]:
+        logger.info(f"Strategy '{strategy}' specified - disabling raw spectral mode to use traditional feature engineering")
+        use_raw_spectral_override = False
+    else:
+        use_raw_spectral_override = use_raw_spectral
+
+    cfg = setup_pipeline_config(use_gpu, use_raw_spectral_override, validation_dir, config_path)
+
+    # Configure SHAP-based feature selection if specified
+    if shap_features_file:
+        cfg.use_shap_feature_selection = True
+        cfg.shap_importance_file = shap_features_file
+        cfg.shap_top_n_features = shap_top_n
+        cfg.shap_min_importance = shap_min_importance
+        logger.info(f"[SHAP FEATURE SELECTION] Enabled via command line:")
+        logger.info(f"  - SHAP file: {shap_features_file}")
+        logger.info(f"  - Top N: {shap_top_n}")
+        if shap_min_importance:
+            logger.info(f"  - Min importance: {shap_min_importance}")
+
     # Use config values when command line values are not provided
     if n_trials is None:
         n_trials = cfg.tuner.n_trials
         logger.info(f"Using n_trials from config: {n_trials}")
     else:
         logger.info(f"Using n_trials from command line: {n_trials}")
-    
+
     if timeout is None:
         timeout = cfg.tuner.timeout
         logger.info(f"Using timeout from config: {timeout}")
     else:
         logger.info(f"Using timeout from command line: {timeout}")
-    
-    if strategy is None:
-        strategy = cfg.feature_strategies[0] if cfg.feature_strategies else "simple_only"
-        logger.info(f"Using strategy from config: {strategy}")
-    else:
-        logger.info(f"Using strategy from command line: {strategy}")
-        
+
     logger.info(f"Starting multi-model optimization run: {cfg.run_timestamp}")
     
     run_data_preparation(cfg, use_data_parallel, data_n_jobs)
-    full_dataset, global_data_manager = load_and_clean_data(cfg, use_data_parallel, data_n_jobs)
+    full_dataset, global_data_manager = load_and_clean_data(cfg, use_data_parallel, data_n_jobs, exclude_suspects_file)
     
     # Use either the passed validation_dir or the one from config
     validation_directory = validation_dir or cfg.custom_validation_dir
@@ -1076,7 +1217,8 @@ def run_model_optimization_pipeline(model_names: list, use_gpu: bool = False, us
 
 def run_range_specialist_pipeline(use_gpu: bool = False, validation_dir: Optional[str] = None,
                                  config_path: Optional[str] = None, strategy: str = "simple_only",
-                                 n_trials: Optional[int] = None, timeout: int = 7200, use_pca: bool = False):
+                                 n_trials: Optional[int] = None, timeout: int = 7200, use_pca: bool = False,
+                                 exclude_suspects_file: Optional[str] = None):
     """Executes the Range Specialist Neural Network optimization for 0.2-0.5%% magnesium range."""
     cfg = setup_pipeline_config(use_gpu, validation_dir, config_path)
     
@@ -1093,7 +1235,7 @@ def run_range_specialist_pipeline(use_gpu: bool = False, validation_dir: Optiona
     
     # Prepare data using the same process as other optimizers
     run_data_preparation(cfg)
-    full_dataset, global_data_manager = load_and_clean_data(cfg)
+    full_dataset, global_data_manager = load_and_clean_data(cfg, exclude_suspects_file=exclude_suspects_file)
     
     # Use either the passed validation_dir or the one from config
     validation_directory = validation_dir or cfg.custom_validation_dir
@@ -1197,10 +1339,24 @@ def run_single_prediction_pipeline(input_file: str, model_path: str):
     print(f"  Predicted Magnesium Concentration: {prediction:.4f} %")
     print("--------------------------------\n")
 
-def run_batch_prediction_pipeline(input_dir: str, model_path: str, output_file: str, reference_file: Optional[str] = None):
-    """Executes batch predictions on a directory, including the averaging step."""
+def run_batch_prediction_pipeline(input_dir: str, model_path: str, output_file: str, reference_file: Optional[str] = None, use_data_parallel: Optional[bool] = None, data_n_jobs: Optional[int] = None, max_samples: Optional[int] = None):
+    """Executes batch predictions on a directory, including the averaging step.
+
+    Args:
+        max_samples: Maximum number of sample IDs to process (default: None for all)
+    """
     cfg = setup_pipeline_config()
+
+    # Override parallel settings if provided (for batch predictions only)
+    if use_data_parallel is not None:
+        cfg.parallel.use_data_parallel = use_data_parallel
+        logger.info(f"Overriding data parallel setting for batch prediction: {use_data_parallel}")
+    if data_n_jobs is not None:
+        cfg.parallel.data_n_jobs = data_n_jobs
+        logger.info(f"Overriding data n_jobs setting for batch prediction: {data_n_jobs}")
+
     logger.info(f"Starting batch prediction run from dir: {input_dir}")
+    logger.info(f"Batch prediction using data_parallel={cfg.parallel.use_data_parallel}, data_n_jobs={cfg.parallel.data_n_jobs}")
 
     # Save configuration for this prediction run
     reporter = Reporter(cfg)
@@ -1209,7 +1365,8 @@ def run_batch_prediction_pipeline(input_dir: str, model_path: str, output_file: 
     predictor = Predictor(config=cfg)
     results_df = predictor.make_batch_predictions(
         input_dir=Path(input_dir),
-        model_path=Path(model_path)
+        model_path=Path(model_path),
+        max_samples=max_samples
     )
     
     # Handle output file path - check if it's already a full path or relative to reports_dir
@@ -1307,6 +1464,102 @@ def run_batch_prediction_pipeline(input_dir: str, model_path: str, output_file: 
         except Exception as e:
             logger.error(f"Could not calculate metrics due to an error: {e}", exc_info=True)
 
+
+# --- Classification Prediction Pipeline Functions ---
+
+def run_single_classification_pipeline(input_file: str, model_path: str):
+    """Executes a binary classification prediction on a single, non-averaged input file."""
+    from src.models.classification_predictor import ClassificationPredictor
+    
+    cfg = setup_pipeline_config()
+    logger.info(f"Starting single-file classification for: {input_file}")
+
+    # Save configuration for this prediction run
+    reporter = Reporter(cfg)
+    reporter.save_config()
+
+    predictor = ClassificationPredictor(config=cfg)
+    result = predictor.make_prediction(
+        input_file=Path(input_file),
+        model_path=Path(model_path)
+    )
+    
+    # Display results
+    print("\n--- CLASSIFICATION RESULT ---")
+    print(f"Sample: {result['sample_file']}")
+    print(f"Prediction: {result['label']} ({result['prediction']})")
+    if result['probability'] is not None:
+        print(f"Probability: {result['probability']:.4f}")
+    print(f"Threshold: {result['threshold']}")
+    print("-------------------------------")
+    
+    logger.info(f"Classification complete for {input_file}")
+
+
+def run_batch_classification_pipeline(input_dir: str, model_path: str, output_file: str, use_data_parallel: Optional[bool] = None, data_n_jobs: Optional[int] = None):
+    """Executes batch binary classification predictions on a directory of raw files."""
+    from src.models.classification_predictor import ClassificationPredictor
+
+    cfg = setup_pipeline_config()
+
+    # Override parallel settings if provided (for batch classifications only)
+    if use_data_parallel is not None:
+        cfg.parallel.use_data_parallel = use_data_parallel
+        logger.info(f"Overriding data parallel setting for batch classification: {use_data_parallel}")
+    if data_n_jobs is not None:
+        cfg.parallel.data_n_jobs = data_n_jobs
+        logger.info(f"Overriding data n_jobs setting for batch classification: {data_n_jobs}")
+
+    logger.info(f"Starting batch classification for directory: {input_dir}")
+    logger.info(f"Batch classification using data_parallel={cfg.parallel.use_data_parallel}, data_n_jobs={cfg.parallel.data_n_jobs}")
+
+    # Save configuration for this prediction run
+    reporter = Reporter(cfg)
+    reporter.save_config()
+
+    predictor = ClassificationPredictor(config=cfg)
+    results_df = predictor.make_batch_predictions(
+        input_dir=Path(input_dir),
+        model_path=Path(model_path)
+    )
+    
+    # Handle output file path - check if it's already a full path or relative to reports_dir
+    output_path = Path(output_file)
+    if output_path.is_absolute():
+        output_file_path = output_path
+    elif str(output_path).startswith('reports/'):
+        # Remove the reports prefix and use reports_dir
+        relative_path = str(output_path)[8:]  # Remove 'reports/' prefix
+        output_file_path = cfg.reports_dir / relative_path
+    else:
+        # Assume it's a filename to be placed in reports_dir
+        output_file_path = cfg.reports_dir / output_file
+    
+    # Ensure output directory exists
+    output_file_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Save results
+    results_df.to_csv(output_file_path, index=False)
+    logger.info(f"Classification results saved to: {output_file_path}")
+    
+    # Display summary
+    total_samples = len(results_df)
+    successful_predictions = len(results_df[results_df['prediction'].notna()])
+    high_predictions = len(results_df[results_df['prediction'] == 1])
+    low_predictions = len(results_df[results_df['prediction'] == 0])
+    
+    print("\n--- BATCH CLASSIFICATION SUMMARY ---")
+    print(f"  Total samples processed: {total_samples}")
+    print(f"  Successful predictions: {successful_predictions}")
+    print(f"  High class predictions: {high_predictions}")
+    print(f"  Low class predictions: {low_predictions}")
+    print(f"  Failed predictions: {total_samples - successful_predictions}")
+    if len(results_df) > 0:
+        print(f"  Classification threshold: {results_df.iloc[0]['threshold']}")
+    print(f"  Results saved to: {output_file_path}")
+    print("--------------------------------------")
+
+
 # --- Config Management Functions ---
 
 def save_current_config(name: str, description: str = ""):
@@ -1343,9 +1596,10 @@ def create_training_config(name: str, models: list, strategies: list, use_gpu: b
     logger.info(f"Training configuration '{name}' created successfully")
 
 
-def run_classification_pipeline(threshold=0.3, strategy="simple_only", models=None, 
-                               use_gpu=False, config_path=None, use_parallel=None, 
-                               n_jobs=None, use_data_parallel=None, data_n_jobs=None):
+def run_classification_pipeline(threshold=0.3, strategy="simple_only", models=None,
+                               use_gpu=False, config_path=None, use_parallel=None,
+                               n_jobs=None, use_data_parallel=None, data_n_jobs=None,
+                               exclude_suspects_file: Optional[str] = None):
     """
     Run the classification pipeline for magnesium level prediction.
     
@@ -1407,7 +1661,178 @@ def run_classification_pipeline(threshold=0.3, strategy="simple_only", models=No
     except Exception as e:
         logger.warning(f"Could not determine best model: {e}")
     
+    # Save configuration for future reuse
+    config_name = f"classification_run_{cfg.run_timestamp}"
+    description = f"Classification run - Threshold: {threshold}, Strategy: {strategy}"
+    config_manager.save_config(cfg, config_name, description)
+    
     logger.info("\nClassification pipeline completed successfully!")
+    logger.info(f"Configuration saved as: {config_name}")
+
+
+def run_mislabel_detection(focus_range_min: float = 0.0, focus_range_max: float = 0.5,
+                          use_features: bool = True,
+                          clustering_methods: str = "kmeans,dbscan,hierarchical",
+                          outlier_methods: str = "lof,isolation_forest",
+                          min_confidence: int = 2, export_results: bool = True,
+                          config_path: Optional[str] = None,
+                          use_feature_parallel: bool = False, feature_n_jobs: int = 1,
+                          use_data_parallel: bool = False, data_n_jobs: int = -1,
+                          exclude_suspects_file: Optional[str] = None,
+                          strategy_override: Optional[str] = None,
+                          no_raw_spectral: bool = False):
+    """
+    Run mislabel detection analysis to identify potentially mislabeled samples.
+
+    Note: Raw spectral analysis is automatically enabled/disabled based on
+          config.use_raw_spectral_data setting.
+
+    Args:
+        focus_range_min: Minimum concentration to focus analysis on
+        focus_range_max: Maximum concentration to focus analysis on
+        use_features: Whether to use engineered features for clustering
+        clustering_methods: Comma-separated list of clustering methods
+        outlier_methods: Comma-separated list of outlier detection methods
+        min_confidence: Minimum confidence level for suspect export
+        export_results: Whether to export suspect lists
+        config_path: Path to configuration file
+        use_feature_parallel: Enable parallel processing for feature engineering
+        feature_n_jobs: Number of parallel jobs for feature processing
+        use_data_parallel: Enable parallel processing for data operations
+        data_n_jobs: Number of parallel jobs for data operations
+    """
+    cfg = setup_pipeline_config(config_path=config_path)
+    logger.info(f"Starting mislabel detection analysis...")
+    logger.info(f"Focus range: {focus_range_min:.2f} - {focus_range_max:.2f}")
+
+    # Load and prepare the dataset
+    full_dataset, data_manager = load_and_clean_data(cfg)
+    logger.info(f"Loaded dataset with {len(full_dataset)} samples")
+
+    # Initialize reporter for saving configuration and reports
+    reporter = Reporter(cfg)
+
+    # Initialize mislabel detector with parallel processing configuration
+    detector = MislabelDetector(
+        cfg,
+        focus_range=(focus_range_min, focus_range_max),
+        use_feature_parallel=use_feature_parallel,
+        feature_n_jobs=feature_n_jobs,
+        use_data_parallel=use_data_parallel,
+        data_n_jobs=data_n_jobs,
+        strategy_override=strategy_override
+    )
+
+    # Parse method lists
+    cluster_methods = [m.strip() for m in clustering_methods.split(",")]
+    outlier_methods_list = [m.strip() for m in outlier_methods.split(",")]
+
+    # Override raw spectral setting if requested
+    use_raw_spectral_final = cfg.use_raw_spectral_data and not no_raw_spectral
+    if no_raw_spectral and cfg.use_raw_spectral_data:
+        logger.info("Raw spectral analysis disabled by --no-raw-spectral flag")
+
+    # Run detection analysis
+    results = detector.detect_mislabels(
+        dataset=full_dataset,
+        use_features=use_features,
+        clustering_methods=cluster_methods,
+        outlier_methods=outlier_methods_list,
+        min_cluster_size=5,
+        use_raw_spectral_override=use_raw_spectral_final
+    )
+
+    # Print summary
+    print("\n" + "="*80)
+    print("MISLABEL DETECTION RESULTS")
+    print("="*80)
+
+    if "error" in results:
+        print(f"❌ Analysis failed: {results['error']}")
+        return
+
+    n_suspicious = len(results["suspicious_samples"])
+    total_samples = results["dataset_info"]["focus_samples"]
+
+    print(f"📊 Dataset Information:")
+    print(f"   • Total samples: {results['dataset_info']['total_samples']}")
+    print(f"   • Focus range samples: {total_samples}")
+    print(f"   • Suspicious samples found: {n_suspicious}")
+    print(f"   • Suspicion rate: {n_suspicious/total_samples:.1%}")
+
+    # Show high-confidence suspects
+    high_confidence = [s for s in results["suspicious_samples"].values() if s["suspicion_count"] >= min_confidence]
+    print(f"\n🔍 High-confidence suspects (flagged by ≥{min_confidence} methods): {len(high_confidence)}")
+
+    if high_confidence:
+        print("   Sample ID | Confidence | Methods")
+        print("   " + "-"*35)
+        for suspect in sorted(high_confidence, key=lambda x: x["suspicion_count"], reverse=True)[:10]:
+            methods = ", ".join(set([r.split('_')[0] for r in suspect["reasons"]]))
+            print(f"   {suspect['sample_id']:>9} | {suspect['suspicion_count']:>10} | {methods}")
+
+        if len(high_confidence) > 10:
+            print(f"   ... and {len(high_confidence)-10} more")
+
+    print(f"\n💡 Recommendations:")
+    for rec in results["recommendations"]:
+        print(f"   {rec}")
+
+    # Generate visualizations
+    try:
+        print(f"\n📈 Generating visualizations...")
+        detector.visualize_results()
+        print(f"   ✅ Visualizations saved to reports/mislabel_analysis/")
+    except Exception as e:
+        print(f"   ❌ Visualization failed: {e}")
+
+    # Export results if requested
+    if export_results and n_suspicious > 0:
+        try:
+            print(f"\n📤 Exporting suspicious samples...")
+            export_path = detector.export_suspect_list(min_suspicion_count=min_confidence)
+            if export_path:
+                print(f"   ✅ Suspicious samples exported to: {export_path}")
+
+                # Also export lower confidence for review
+                if min_confidence > 1:
+                    review_path = detector.export_suspect_list(min_suspicion_count=1)
+                    if review_path:
+                        print(f"   ✅ All suspects (for review) exported to: {review_path}")
+        except Exception as e:
+            print(f"   ❌ Export failed: {e}")
+
+    print("\n🎯 Next Steps:")
+    print("   1. Review the visualizations in reports/mislabel_analysis/")
+    print("   2. Manually inspect high-confidence suspects")
+    print("   3. Use exported sample lists to exclude from next training run")
+    print("   4. Re-run training without suspicious samples")
+
+    # Save configuration and summary report (following training pipeline pattern)
+    try:
+        # Save reporter configuration
+        reporter.save_config()
+
+        # Determine strategy info for config description
+        if strategy_override:
+            strategy_info = f"Strategy override: {strategy_override}"
+        elif cfg.use_raw_spectral_data:
+            strategy_info = "Raw spectral data mode"
+        else:
+            strategy_info = f"Strategy: {cfg.feature_strategies[0] if cfg.feature_strategies else 'simple_only'}"
+
+        # Save configuration for future reuse
+        config_name = f"mislabel_detection_{cfg.run_timestamp}"
+        description = f"Mislabel detection run - {strategy_info}, Focus: {focus_range_min:.1f}-{focus_range_max:.1f}, Min confidence: {min_confidence}, Found: {n_suspicious} suspects"
+        config_manager.save_config(cfg, config_name, description)
+
+        print(f"\n💾 Configuration saved as: {config_name}")
+        logger.info(f"Configuration saved as: {config_name}")
+    except Exception as e:
+        logger.error(f"Failed to save configuration: {e}")
+        print(f"   ❌ Failed to save configuration: {e}")
+
+    logger.info("Mislabel detection analysis completed")
 
 
 def main():
@@ -1430,6 +1855,10 @@ def main():
     parent_parser.add_argument("--data-parallel", action="store_true", help="Enable parallel processing for data averaging and cleansing (overrides config)")
     parent_parser.add_argument("--no-data-parallel", action="store_true", help="Disable parallel processing for data operations (overrides config)")
     parent_parser.add_argument("--data-n-jobs", type=int, help="Number of parallel jobs for data operations (-1 uses all cores, overrides config)")
+    parent_parser.add_argument("--exclude-suspects", type=str, help="Path to CSV file containing sample IDs to exclude from training (e.g., reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv)")
+    parent_parser.add_argument("--shap-features", type=str, help="Path to SHAP importance CSV file for feature selection (e.g., models/model_name_shap_importance.csv)")
+    parent_parser.add_argument("--shap-top-n", type=int, default=30, help="Number of top SHAP features to select (default: 30)")
+    parent_parser.add_argument("--shap-min-importance", type=float, help="Minimum SHAP importance threshold (optional)")
 
     # Train subparser with models selection
     parser_train = subparsers.add_parser("train", parents=[parent_parser], help="Run the standard model training pipeline.")
@@ -1437,11 +1866,11 @@ def main():
                              choices=["ridge", "lasso", "random_forest", "xgboost", "lightgbm", "catboost", "extratrees", "neural_network", "neural_network_light", "svr"],
                              help="Models to train (default: use models from config)")
     parser_train.add_argument("--strategy", type=str, 
-                             choices=["full_context", "simple_only", "Mg_only"],
+                             choices=["full_context", "simple_only", "K_only"],
                              help="Feature strategy to use (default: use strategies from config)")
     parser_autogluon = subparsers.add_parser("autogluon", parents=[parent_parser], help="Run the AutoGluon training pipeline.")
     parser_autogluon.add_argument("--strategy", type=str, 
-                                 choices=["full_context", "simple_only", "Mg_only"],
+                                 choices=["full_context", "simple_only", "K_only"],
                                  help="Feature strategy to use (default: use strategies from config)")
     # Tune subparser with models selection
     parser_tune = subparsers.add_parser("tune", parents=[parent_parser], help="Run hyperparameter tuning for standard models.")
@@ -1452,7 +1881,7 @@ def main():
     # XGBoost Optimization subparser
     parser_optimize_xgboost = subparsers.add_parser("optimize-xgboost", parents=[parent_parser], help="Run dedicated XGBoost optimization")
     parser_optimize_xgboost.add_argument("--strategy", type=str, default=None, 
-                                       choices=["full_context", "simple_only", "Mg_only"],
+                                       choices=["full_context", "simple_only", "K_only"],
                                        help="Feature strategy to use")
     parser_optimize_xgboost.add_argument("--trials", type=int, default=None, help="Number of optimization trials (default from config)")
     parser_optimize_xgboost.add_argument("--timeout", type=int, default=None, help="Timeout in seconds (default from config)")
@@ -1460,7 +1889,7 @@ def main():
     # AutoGluon Optimization subparser
     parser_optimize_autogluon = subparsers.add_parser("optimize-autogluon", parents=[parent_parser], help="Run dedicated AutoGluon optimization")
     parser_optimize_autogluon.add_argument("--strategy", type=str, default=None, 
-                                         choices=["full_context", "simple_only", "Mg_only"],
+                                         choices=["full_context", "simple_only", "K_only"],
                                          help="Feature strategy to use")
     parser_optimize_autogluon.add_argument("--trials", type=int, default=None, help="Number of optimization trials (default from config)")
     parser_optimize_autogluon.add_argument("--timeout", type=int, default=None, help="Timeout in seconds (default from config)")
@@ -1471,7 +1900,7 @@ def main():
                                       choices=["xgboost", "lightgbm", "catboost", "random_forest", "extratrees", "neural_network", "neural_network_light", "autogluon"],
                                       help="Models to optimize")
     parser_optimize_models.add_argument("--strategy", type=str, default=None, 
-                                      choices=["full_context", "simple_only", "Mg_only"],
+                                      choices=["full_context", "simple_only", "K_only"],
                                       help="Feature strategy to use")
     parser_optimize_models.add_argument("--trials", type=int, default=None, help="Number of optimization trials per model (default from config)")
     parser_optimize_models.add_argument("--timeout", type=int, default=None, help="Timeout in seconds per model (default from config)")
@@ -1480,7 +1909,7 @@ def main():
     parser_classify = subparsers.add_parser("classify", parents=[parent_parser], help="Train classification models for magnesium threshold prediction")
     parser_classify.add_argument("--threshold", type=float, default=0.3, help="Classification threshold for magnesium levels (default: 0.3)")
     parser_classify.add_argument("--strategy", type=str, default="simple_only", 
-                               choices=["full_context", "simple_only", "Mg_only"],
+                               choices=["full_context", "simple_only", "K_only"],
                                help="Feature strategy to use")
     parser_classify.add_argument("--models", nargs="+", 
                                choices=["logistic", "random_forest", "extratrees", "svm", "naive_bayes", "knn", "xgboost", "lightgbm", "catboost"],
@@ -1490,7 +1919,7 @@ def main():
     # Range Specialist Neural Network Optimization subparser
     parser_range_specialist = subparsers.add_parser("optimize-range-specialist", parents=[parent_parser], help="Optimize neural network for 0.2-0.5%% magnesium range (target R² > 0.5)")
     parser_range_specialist.add_argument("--strategy", type=str, default="simple_only", 
-                                       choices=["full_context", "simple_only", "Mg_only"],
+                                       choices=["full_context", "simple_only", "K_only"],
                                        help="Feature strategy to use")
     parser_range_specialist.add_argument("--trials", type=int, default=None, help="Number of optimization trials (default from config)")
     parser_range_specialist.add_argument("--timeout", type=int, default=7200, help="Timeout in seconds")
@@ -1502,11 +1931,22 @@ def main():
     parser_predict_single.add_argument("--model-path", type=str, required=True, help="Path to the trained model (.pkl) or AutoGluon directory.")
 
     # Batch Prediction subparser
-    parser_predict_batch = subparsers.add_parser("predict-batch", help="Make batch predictions on a directory of raw files.")
+    parser_predict_batch = subparsers.add_parser("predict-batch", parents=[parent_parser], help="Make batch predictions on a directory of raw files.")
     parser_predict_batch.add_argument("--input-dir", type=str, required=True, help="Path to the directory with raw spectral files.")
     parser_predict_batch.add_argument("--model-path", type=str, required=True, help="Path to the trained model (.pkl) or AutoGluon directory.")
     parser_predict_batch.add_argument("--output-file", type=str, default="batch_predictions.csv", help="Name for the output CSV file in the reports directory.")
     parser_predict_batch.add_argument("--reference-file", type=str, required=False, help="Optional: Path to an Excel file with true values to calculate metrics.")
+    parser_predict_batch.add_argument("--max-samples", type=int, default=None, help="Maximum number of sample IDs to process (default: all)")
+
+    # Classification Prediction subparsers
+    parser_classify_single = subparsers.add_parser("classify-single", help="Make a binary classification prediction on a single raw file.")
+    parser_classify_single.add_argument("--input-file", type=str, required=True, help="Path to the raw spectral .csv.txt file.")
+    parser_classify_single.add_argument("--model-path", type=str, required=True, help="Path to the trained classification model (.pkl).")
+
+    parser_classify_batch = subparsers.add_parser("classify-batch", help="Make batch binary classification predictions on a directory of raw files.")
+    parser_classify_batch.add_argument("--input-dir", type=str, required=True, help="Path to the directory with raw spectral files.")
+    parser_classify_batch.add_argument("--model-path", type=str, required=True, help="Path to the trained classification model (.pkl).")
+    parser_classify_batch.add_argument("--output-file", type=str, default="batch_classifications.csv", help="Name for the output CSV file in the reports directory.")
 
     # Config Management subparsers
     parser_save_config = subparsers.add_parser("save-config", help="Save current configuration to file")
@@ -1522,6 +1962,20 @@ def main():
     parser_create_training_config.add_argument("--gpu", action="store_true", help="Use GPU acceleration")
     parser_create_training_config.add_argument("--sample-weights", action="store_true", default=True, help="Use sample weights")
     parser_create_training_config.add_argument("--description", type=str, default="", help="Configuration description")
+
+    # Mislabel Detection subparser
+    parser_mislabel = subparsers.add_parser("detect-mislabels", parents=[parent_parser], help="Detect potentially mislabeled samples using clustering")
+    parser_mislabel.add_argument("--focus-min", type=float, default=0.0, help="Minimum concentration to focus on (default: 0.0)")
+    parser_mislabel.add_argument("--focus-max", type=float, default=0.5, help="Maximum concentration to focus on (default: 0.5)")
+    parser_mislabel.add_argument("--no-features", action="store_true", help="Skip engineered features analysis")
+    parser_mislabel.add_argument("--clustering-methods", type=str, default="kmeans,dbscan,hierarchical", help="Clustering methods to use (comma-separated)")
+    parser_mislabel.add_argument("--outlier-methods", type=str, default="lof,isolation_forest", help="Outlier detection methods to use (comma-separated)")
+    parser_mislabel.add_argument("--min-confidence", type=int, default=2, help="Minimum confidence level for suspect export (default: 2)")
+    parser_mislabel.add_argument("--no-export", action="store_true", help="Skip exporting results")
+    parser_mislabel.add_argument("--strategy", type=str,
+                               choices=["full_context", "simple_only", "K_only"],
+                               help="Feature strategy to use (overrides config setting)")
+    parser_mislabel.add_argument("--no-raw-spectral", action="store_true", help="Skip raw spectral analysis (force only feature-based analysis)")
 
     args = parser.parse_args()
     
@@ -1592,37 +2046,48 @@ def main():
         data_n_jobs = getattr(args, 'data_n_jobs', None)
         if data_n_jobs is None:
             data_n_jobs = default_data_n_jobs
+
+        # Get exclude_suspects parameter
+        exclude_suspects_file = getattr(args, 'exclude_suspects', None)
+
+        # Get SHAP feature selection parameters
+        shap_features_file = getattr(args, 'shap_features', None)
+        shap_top_n = getattr(args, 'shap_top_n', 30)
+        shap_min_importance = getattr(args, 'shap_min_importance', None)
+
         if args.stage == "train":
             models = getattr(args, 'models', None)
             strategy = getattr(args, 'strategy', None)
-            run_training_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, models=models, strategy=strategy, use_parallel=use_parallel, n_jobs=n_jobs, use_data_parallel=use_data_parallel, data_n_jobs=data_n_jobs)
+            run_training_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, models=models, strategy=strategy, use_parallel=use_parallel, n_jobs=n_jobs, use_data_parallel=use_data_parallel, data_n_jobs=data_n_jobs, exclude_suspects_file=exclude_suspects_file, shap_features_file=shap_features_file, shap_top_n=shap_top_n, shap_min_importance=shap_min_importance)
         elif args.stage == "autogluon":
             strategy = getattr(args, 'strategy', None)
-            run_autogluon_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, strategy=strategy, use_parallel=use_parallel, n_jobs=n_jobs, use_data_parallel=use_data_parallel, data_n_jobs=data_n_jobs)
+            run_autogluon_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, strategy=strategy, use_parallel=use_parallel, n_jobs=n_jobs, use_data_parallel=use_data_parallel, data_n_jobs=data_n_jobs, exclude_suspects_file=exclude_suspects_file, shap_features_file=shap_features_file, shap_top_n=shap_top_n, shap_min_importance=shap_min_importance)
         elif args.stage == "tune":
             models = getattr(args, 'models', None)
-            run_tuning_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, models=models)
+            run_tuning_pipeline(use_gpu=use_gpu, use_raw_spectral=use_raw_spectral, validation_dir=validation_dir, config_path=config_path, models=models, exclude_suspects_file=exclude_suspects_file)
         elif args.stage == "optimize-xgboost":
             run_xgboost_optimization_pipeline(
-                use_gpu=use_gpu, 
-                validation_dir=validation_dir, 
+                use_gpu=use_gpu,
+                validation_dir=validation_dir,
                 config_path=config_path,
                 strategy=args.strategy,
                 n_trials=args.trials,
                 timeout=args.timeout,
                 use_parallel=use_parallel,
-                n_jobs=n_jobs
+                n_jobs=n_jobs,
+                exclude_suspects_file=exclude_suspects_file
             )
         elif args.stage == "optimize-autogluon":
             run_autogluon_optimization_pipeline(
-                use_gpu=use_gpu, 
-                validation_dir=validation_dir, 
+                use_gpu=use_gpu,
+                validation_dir=validation_dir,
                 config_path=config_path,
                 strategy=args.strategy,
                 n_trials=args.trials,
                 timeout=args.timeout,
                 use_parallel=use_parallel,
-                n_jobs=n_jobs
+                n_jobs=n_jobs,
+                exclude_suspects_file=exclude_suspects_file
             )
         elif args.stage == "optimize-models":
             run_model_optimization_pipeline(
@@ -1637,7 +2102,11 @@ def main():
                 use_parallel=use_parallel,
                 n_jobs=n_jobs,
                 use_data_parallel=use_data_parallel,
-                data_n_jobs=data_n_jobs
+                data_n_jobs=data_n_jobs,
+                exclude_suspects_file=exclude_suspects_file,
+                shap_features_file=shap_features_file,
+                shap_top_n=shap_top_n,
+                shap_min_importance=shap_min_importance
             )
         elif args.stage == "optimize-range-specialist":
             run_range_specialist_pipeline(
@@ -1647,7 +2116,8 @@ def main():
                 strategy=args.strategy,
                 n_trials=args.trials,
                 timeout=args.timeout,
-                use_pca=args.pca
+                use_pca=args.pca,
+                exclude_suspects_file=exclude_suspects_file
             )
         elif args.stage == "classify":
             run_classification_pipeline(
@@ -1659,12 +2129,31 @@ def main():
                 use_parallel=use_parallel,
                 n_jobs=n_jobs,
                 use_data_parallel=use_data_parallel,
-                data_n_jobs=data_n_jobs
+                data_n_jobs=data_n_jobs,
+                exclude_suspects_file=exclude_suspects_file
             )
         elif args.stage == "predict-single":
             run_single_prediction_pipeline(input_file=args.input_file, model_path=args.model_path)
         elif args.stage == "predict-batch":
-            run_batch_prediction_pipeline(input_dir=args.input_dir, model_path=args.model_path, output_file=args.output_file, reference_file=args.reference_file)
+            run_batch_prediction_pipeline(
+                input_dir=args.input_dir,
+                model_path=args.model_path,
+                output_file=args.output_file,
+                reference_file=args.reference_file,
+                use_data_parallel=use_data_parallel,
+                data_n_jobs=data_n_jobs,
+                max_samples=args.max_samples
+            )
+        elif args.stage == "classify-single":
+            run_single_classification_pipeline(input_file=args.input_file, model_path=args.model_path)
+        elif args.stage == "classify-batch":
+            run_batch_classification_pipeline(
+                input_dir=args.input_dir,
+                model_path=args.model_path,
+                output_file=args.output_file,
+                use_data_parallel=use_data_parallel,
+                data_n_jobs=data_n_jobs
+            )
         elif args.stage == "save-config":
             save_current_config(name=args.name, description=args.description)
         elif args.stage == "list-configs":
@@ -1677,6 +2166,24 @@ def main():
                 use_gpu=args.gpu,
                 use_sample_weights=args.sample_weights,
                 description=args.description
+            )
+        elif args.stage == "detect-mislabels":
+            run_mislabel_detection(
+                focus_range_min=args.focus_min,
+                focus_range_max=args.focus_max,
+                use_features=not args.no_features,
+                clustering_methods=args.clustering_methods,
+                outlier_methods=args.outlier_methods,
+                min_confidence=args.min_confidence,
+                export_results=not args.no_export,
+                config_path=config_path,
+                use_feature_parallel=use_parallel,
+                feature_n_jobs=n_jobs,
+                use_data_parallel=use_data_parallel,
+                data_n_jobs=data_n_jobs,
+                exclude_suspects_file=exclude_suspects_file,
+                strategy_override=getattr(args, 'strategy', None),
+                no_raw_spectral=getattr(args, 'no_raw_spectral', False)
             )          
     except (DataValidationError, PipelineError, FileNotFoundError) as e:
         logger.error(f"Pipeline stopped due to a known error: {e}")

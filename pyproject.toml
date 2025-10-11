@@ -1,7 +1,7 @@
 [project]
-name = "magnesium-pipeline"
+name = "potassium-pipeline"
 version = "0.1.0"
-description = "Machine learning pipeline for magnesium concentration prediction from LIBS spectral data"
+description = "Machine learning pipeline for potassium concentration prediction from LIBS spectral data"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -18,9 +18,11 @@ dependencies = [
  "optuna>=4.4.0",
  "pandas>=2.3.1",
  "pydantic>=2.11.7",
+ "pytest>=8.4.2",
  "python-multipart>=0.0.6",
  "scikit-learn>=1.7.1",
  "seaborn>=0.13.2",
+ "shap>=0.45.0",
  "torch>=2.0.0",
  "uvicorn[standard]>=0.20.0",
  "xgboost>=3.0.2",

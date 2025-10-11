@@ -33,7 +33,7 @@ class PeakRegion:
                 raise ValueError(f"Center wavelength {center} outside region bounds")
 
 
-@dataclass 
+@dataclass
 class PeakFitResult:
     """Results from fitting a single peak."""
     height: float
@@ -45,7 +45,15 @@ class PeakFitResult:
     n_function_evaluations: int
     residuals: np.ndarray
     fitted_curve: np.ndarray
-    
+
+    # Physics-informed parameters (NEW)
+    fwhm: float = 0.0  # Full Width at Half Maximum
+    gamma: float = 0.0  # Lorentzian/Stark broadening parameter
+    fit_quality: float = 0.0  # R² of the fit
+    peak_asymmetry: float = 0.0  # Asymmetry index from residuals
+    amplitude: float = 0.0  # Peak amplitude (for Lorentzian)
+    kurtosis: float = 0.0  # Peak kurtosis (tailedness measure)
+
     @property
     def signal_to_noise(self) -> float:
         """Calculate signal-to-noise ratio."""
@@ -53,6 +61,16 @@ class PeakFitResult:
             noise_std = np.std(self.residuals)
             return self.height / noise_std if noise_std > 0 else np.inf
         return np.inf
+
+    @property
+    def stark_broadening(self) -> float:
+        """Alias for gamma parameter (Stark broadening indicator)."""
+        return self.gamma
+
+    @property
+    def is_reliable_fit(self) -> float:
+        """Check if fit is reliable based on R² threshold."""
+        return self.fit_quality > 0.8
 
 
 @dataclass

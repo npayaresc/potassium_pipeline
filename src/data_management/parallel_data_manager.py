@@ -86,10 +86,10 @@ def parallel_average_raw_files(data_manager, n_jobs: int = -1):
     
     logger.info(f"Starting PARALLEL raw file averaging from: {data_manager.config.raw_data_dir}")
     data_manager.config.averaged_files_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Group files by sample ID
     file_groups = defaultdict(list)
-    for file_path in data_manager.config.raw_data_dir.glob('*.csv.txt'):
+    for file_path in data_manager.config.raw_data_dir.glob('**/*.csv.txt'):
         prefix = data_manager._extract_file_prefix(file_path.name)
         file_groups[prefix].append(file_path)
     

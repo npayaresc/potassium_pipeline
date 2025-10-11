@@ -21,7 +21,7 @@ class StorageConfig:
     type: str = "local"  # local, gcs, s3, azure
     bucket_name: Optional[str] = None
     credentials_path: Optional[str] = None
-    prefix: str = "magnesium-pipeline"
+    prefix: str = "potassium-pipeline"
     data_path: str = "/app/data"
     models_path: str = "/app/models"
     reports_path: str = "/app/reports"

@@ -1,44 +1,43 @@
-# Magnesium Pipeline Migration Notes
+# Potassium Pipeline Migration Notes
 
-This project was created from the Phosphorous Pipeline and adapted for Magnesium detection.
+This project was created from the Phosphorous Pipeline and adapted for Potassium detection.
 
 ## Changes Made
 
 ### 1. Automated Updates
-- All references to "phosphorous"/"phosphorus" changed to "magnesium"
-- Element symbol changed from "P" to "Mg"
+- All references to "phosphorous"/"phosphorus" changed to "potassium"
+- Element symbol changed from "P" to "K"
 - Project name and metadata updated
-- Spectral regions updated for Mg detection
+- Spectral regions updated for K detection
 
 ### 2. Spectral Regions
-Updated from P spectral lines to Mg spectral lines:
-- **Original P regions**: 213-215nm, 253-256nm  
-- **New Mg regions**: 279-281nm (Mg II), 382-385nm (Mg I triplet)
+Updated from P spectral lines to K spectral lines:
+- **Original P regions**: 213-215nm, 253-256nm
+- **New K regions**: 766-770nm (K I doublet), 404nm (K I)
 
-Common Mg LIBS lines for reference:
-- Mg I: 285.21 nm, 382.94 nm, 383.23 nm, 383.83 nm, 518.36 nm
-- Mg II: 279.55 nm, 280.27 nm, 448.11 nm
+Common K LIBS lines for reference:
+- K I: 766.49 nm, 769.90 nm (doublet), 404.41 nm, 404.72 nm
 
 ## Manual Tasks Required
 
 ### 1. Data Preparation
-- [ ] Update reference Excel files with Mg concentration values
-- [ ] Ensure spectral data covers Mg wavelength regions
+- [ ] Update reference Excel files with K concentration values
+- [ ] Ensure spectral data covers K wavelength regions
 - [ ] Verify data file naming conventions
 
 ### 2. Configuration Updates
-- [ ] Review `src/config/pipeline_config.py` for Mg-specific settings
-- [ ] Adjust concentration ranges (typical Mg ranges may differ from P)
+- [ ] Review `src/config/pipeline_config.py` for K-specific settings
+- [ ] Adjust concentration ranges (typical K ranges may differ from P)
 - [ ] Update outlier detection thresholds if needed
 
 ### 3. Model Tuning
-- [ ] Adjust hyperparameter ranges for Mg concentration prediction
-- [ ] Update sample weighting if Mg distribution differs from P
+- [ ] Adjust hyperparameter ranges for K concentration prediction
+- [ ] Update sample weighting if K distribution differs from P
 - [ ] Consider different model architectures if needed
 
 ### 4. Validation
-- [ ] Verify spectral peak extraction works for Mg lines
-- [ ] Test with sample Mg data
+- [ ] Verify spectral peak extraction works for K lines
+- [ ] Test with sample K data
 - [ ] Validate model performance metrics
 
 ### 5. Cloud Deployment
@@ -53,9 +52,9 @@ Common Mg LIBS lines for reference:
    uv sync
    ```
 
-2. **Prepare your Mg data**:
+2. **Prepare your K data**:
    - Place spectral files in `data/raw/`
-   - Add reference Excel with Mg concentrations
+   - Add reference Excel with K concentrations
 
 3. **Update spectral regions** (if needed):
    Edit `src/config/pipeline_config.py` to match your LIBS setup
@@ -82,4 +81,4 @@ Common Mg LIBS lines for reference:
 ## Support
 
 For questions about the original phosphorous pipeline, refer to the source project.
-For Mg-specific adaptations, document changes in this file.
+For K-specific adaptations, document changes in this file.

@@ -2,7 +2,7 @@
 Feature Selection Module for High-Dimensional Data
 
 This module provides various feature selection methods to handle
-high-dimension/low-sample scenarios in the magnesium pipeline.
+high-dimension/low-sample scenarios in the potassium pipeline.
 """
 
 import logging
@@ -141,20 +141,36 @@ class SpectralFeatureSelector(BaseEstimator, TransformerMixin):
     def fit(self, X: Union[np.ndarray, pd.DataFrame], y: Union[np.ndarray, pd.Series]):
         """
         Fit the feature selector on training data.
-        
+
         Args:
             X: Training feature matrix
             y: Training target values
-            
+
         Returns:
             Self for method chaining
         """
+        # Check for NaN values in input
+        if isinstance(X, pd.DataFrame):
+            if X.isnull().any().any():
+                nan_cols = X.columns[X.isnull().any()].tolist()
+                logger.warning(f"[FEATURE SELECTION] Input contains NaN values in columns: {nan_cols}")
+                # Try to handle NaN values
+                X = X.fillna(0)
+                logger.info("[FEATURE SELECTION] Filled NaN values with 0")
+        elif isinstance(X, np.ndarray):
+            if np.isnan(X).any():
+                nan_count = np.sum(np.isnan(X))
+                logger.warning(f"[FEATURE SELECTION] Input contains {nan_count} NaN values")
+                # Replace NaN with 0
+                X = np.nan_to_num(X, nan=0.0)
+                logger.info("[FEATURE SELECTION] Replaced NaN values with 0")
+
         # Store feature names if available
         if isinstance(X, pd.DataFrame):
             self.feature_names_ = X.columns.tolist()
         else:
             self.feature_names_ = [f"feature_{i}" for i in range(X.shape[1])]
-        
+
         # Log before feature selection
         original_features = X.shape[1]
         target_features = self._get_n_features(X)

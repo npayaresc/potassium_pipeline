@@ -22,11 +22,12 @@ class DataManager:
         self.config = config
         self.sample_metadata: Optional[pd.DataFrame] = None
         self._global_wavelength_range: Optional[Tuple[float, float]] = None
-        self.use_parallel_data_ops: bool = False
-        self.data_ops_n_jobs: int = -1
+        # Initialize parallel settings from config
+        self.use_parallel_data_ops: bool = getattr(config.parallel, 'use_data_parallel', False)
+        self.data_ops_n_jobs: int = getattr(config.parallel, 'data_n_jobs', -1)
 
     def load_and_prepare_metadata(self) -> pd.DataFrame:
-        """Loads, filters, and validates reference magnesium data."""
+        """Loads, filters, and validates reference potassium data."""
         logger.info(f"Loading reference data from: {self.config.reference_data_path}")
         try:
             df = pd.read_excel(self.config.reference_data_path)
@@ -176,7 +177,7 @@ class DataManager:
         self.config.averaged_files_dir.mkdir(parents=True, exist_ok=True)
 
         file_groups = defaultdict(list)
-        for file_path in self.config.raw_data_dir.glob('*.csv.txt'):
+        for file_path in self.config.raw_data_dir.glob('**/*.csv.txt'):
             prefix = self._extract_file_prefix(file_path.name)
             file_groups[prefix].append(file_path)
 
@@ -385,10 +386,10 @@ class DataManager:
         """
         min_wavelengths = []
         max_wavelengths = []
-        
-        # Get raw files from the raw data directory
-        raw_files = list(self.config.raw_data_dir.glob("*.csv.txt"))
-        
+
+        # Get raw files from the raw data directory (including subdirectories)
+        raw_files = list(self.config.raw_data_dir.glob("**/*.csv.txt"))
+
         logger.info(f"Determining global wavelength range from {len(raw_files)} raw files...")
         
         # Sample first 10 raw files for efficiency

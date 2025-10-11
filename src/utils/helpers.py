@@ -69,11 +69,19 @@ class OutlierClipper(BaseEstimator, TransformerMixin):
         self.percentile = percentile
         self.factor = factor
         self.clipping_values_ = None
+        self.feature_names_in_ = None
 
     def fit(self, X: pd.DataFrame, y: pd.Series = None):
         """Calculates the clipping thresholds."""
         percentile_values = np.nanpercentile(X, self.percentile, axis=0)
         self.clipping_values_ = percentile_values * self.factor
+
+        # Store feature names if input is DataFrame
+        if isinstance(X, pd.DataFrame):
+            self.feature_names_in_ = X.columns.tolist()
+        else:
+            self.feature_names_in_ = [f"x{i}" for i in range(X.shape[1])]
+
         logging.info(f"OutlierClipper fitted for {X.shape[1]} features.")
         return self
 
@@ -88,7 +96,10 @@ class OutlierClipper(BaseEstimator, TransformerMixin):
     def get_feature_names_out(self, input_features=None):
         """Returns feature names for output features."""
         if input_features is None:
-            # If no input features provided, return generic names
+            # Use stored feature names from fit
+            if self.feature_names_in_ is not None:
+                return np.array(self.feature_names_in_)
+            # Fallback to generic names
             n_features = len(self.clipping_values_) if self.clipping_values_ is not None else 0
             return np.array([f"x{i}" for i in range(n_features)])
         else:

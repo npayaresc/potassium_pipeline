@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a machine learning pipeline for predicting magnesium concentration from LIBS (Laser-Induced Breakdown Spectroscopy) spectral data. The pipeline processes spectral intensity measurements at specific wavelengths to predict magnesium percentage in samples.
+This is a machine learning pipeline for predicting potassium concentration from LIBS (Laser-Induced Breakdown Spectroscopy) spectral data. The pipeline processes spectral intensity measurements at specific wavelengths to predict potassium percentage in samples.
 
 ## Key Commands
 
@@ -28,11 +28,20 @@ python main.py train
 # Train with GPU acceleration (requires CUDA)
 python main.py train --gpu
 
+# Train while excluding suspicious samples identified by mislabel detection
+python main.py train --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
+
+# Combine GPU training with sample exclusion
+python main.py train --gpu --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
+
 # Run AutoGluon automated training
 python main.py autogluon
 
 # Run AutoGluon with GPU acceleration
 python main.py autogluon --gpu
+
+# Run AutoGluon while excluding suspicious samples
+python main.py autogluon --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
 
 # Run hyperparameter tuning with Optuna
 python main.py tune
@@ -40,11 +49,20 @@ python main.py tune
 # Run hyperparameter tuning with GPU acceleration
 python main.py tune --gpu
 
+# Run tuning while excluding suspicious samples
+python main.py tune --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
+
 # Run dedicated XGBoost optimization
 python main.py optimize-xgboost --strategy full_context --trials 300 --gpu
 
+# Run XGBoost optimization while excluding suspicious samples
+python main.py optimize-xgboost --strategy full_context --trials 300 --gpu --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
+
 # Run optimization for multiple models
 python main.py optimize-models --models xgboost lightgbm catboost --strategy full_context --trials 200 --gpu
+
+# Run optimization while excluding suspicious samples
+python main.py optimize-models --models xgboost lightgbm catboost --strategy full_context --trials 200 --gpu --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
 
 # Run optimization for tree-based models
 python main.py optimize-models --models random_forest extratrees --strategy simple_only --trials 150
@@ -58,6 +76,9 @@ python main.py predict-single --input-file path/to/file.csv.txt --model-path pat
 # Make batch predictions
 python main.py predict-batch --input-dir path/to/directory --model-path path/to/model.pkl --output-file predictions.csv
 
+# Make batch predictions with limited sample IDs (useful for testing)
+python main.py predict-batch --input-dir path/to/directory --model-path path/to/model.pkl --output-file predictions.csv --max-samples 50
+
 # Configuration Management
 python main.py save-config --name "my_config" --description "Configuration description"
 python main.py list-configs
@@ -65,6 +86,16 @@ python main.py create-training-config --name "quick_test" --models xgboost light
 
 # Use saved configuration
 python main.py train --config configs/my_config_20250131_143052.yaml --gpu
+
+# Detect potentially mislabeled samples
+python main.py detect-mislabels --focus-min 0.0 --focus-max 0.5 --min-confidence 2
+
+# Detect mislabels with custom settings
+python main.py detect-mislabels --focus-min 0.0 --focus-max 0.3 --clustering-methods "kmeans,dbscan" --outlier-methods "lof" --min-confidence 1
+
+# Use parallel processing for faster analysis
+python main.py detect-mislabels --feature-parallel --data-parallel
+python main.py detect-mislabels --feature-parallel --feature-n-jobs 8 --data-parallel --data-n-jobs 4
 ```
 
 ### GPU Support
@@ -86,6 +117,145 @@ Requirements for GPU support:
 rm -rf bad_files/* bad_prediction_files/* logs/* reports/* catboost_info/
 ```
 
+### SHAP Feature Importance Analysis
+
+Analyze feature importance for any trained model using SHAP (SHapley Additive exPlanations):
+
+```bash
+# Analyze latest model by type
+./run_shap_analysis.sh --latest ridge
+./run_shap_analysis.sh --latest xgboost
+./run_shap_analysis.sh --latest catboost
+
+# Analyze specific model
+./run_shap_analysis.sh models/simple_only_ridge_20251006_024858.pkl
+
+# Show help
+./run_shap_analysis.sh --help
+```
+
+**Key Features:**
+- Works with ANY model type (Ridge, XGBoost, LightGBM, CatBoost, Random Forest, etc.)
+- Automatically loads feature names from `.feature_names.json` files
+- Respects feature selection (only analyzes features actually used by the model)
+- Auto-detects model strategy and extracts corresponding training data
+- Generates importance rankings and visualizations
+
+**Output:**
+- `models/<model_name>_shap_importance.csv` - Feature importance table
+- `models/shap_analysis/<model_name>_shap_*.png` - Visualizations (summary, bar, custom plots)
+
+**See:** `SHAP_ANALYSIS_GUIDE.md` for detailed documentation and best practices
+
+### SHAP-Based Feature Selection
+
+Train models using only the top N most important features identified by SHAP analysis:
+
+```bash
+# Complete workflow
+# 1. Train initial model
+python main.py train --models lightgbm --strategy full_context --gpu
+
+# 2. Run SHAP analysis
+./run_shap_analysis.sh --latest lightgbm
+
+# 3. Train with top 30 SHAP features
+python main.py train \
+    --models xgboost lightgbm \
+    --strategy full_context \
+    --shap-features models/full_context_lightgbm_*_shap_importance.csv \
+    --shap-top-n 30 \
+    --gpu
+```
+
+**Key Features:**
+- Reduces features from 495 → 30 (or your chosen N)
+- Often improves performance and interpretability
+- 3-5x faster training and inference
+- Works with training and optimization
+
+**Arguments:**
+- `--shap-features <path>`: Path to SHAP importance CSV file (required)
+- `--shap-top-n <N>`: Number of top features to select (default: 30)
+- `--shap-min-importance <threshold>`: Minimum importance threshold (optional)
+
+**See:** `SHAP_FEATURE_SELECTION_GUIDE.md` for complete documentation and examples
+
+### Sample Exclusion
+
+The pipeline supports excluding suspicious samples identified by mislabel detection from training and optimization:
+
+```bash
+# Use --exclude-suspects flag with any training or optimization command
+python main.py train --exclude-suspects path/to/suspicious_samples.csv
+
+# The CSV file should have a 'sample_id' column containing the IDs to exclude
+# Typically use the output from mislabel detection:
+python main.py train --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
+```
+
+**How it works:**
+- Samples are excluded AFTER data cleaning but BEFORE training
+- The exclusion applies to all models and strategies in the run
+- Excluded samples are logged in the console output
+- Works with all training, tuning, and optimization commands
+
+### Mislabel Detection
+
+The pipeline includes a sophisticated mislabel detection system to identify potentially mislabeled samples, especially in the lower concentration range where mislabeling is more common:
+
+```bash
+# Basic mislabel detection (focuses on 0.0-0.5% range)
+python main.py detect-mislabels
+
+# Focus on specific concentration range
+python main.py detect-mislabels --focus-min 0.0 --focus-max 0.3
+
+# Custom clustering and outlier detection methods
+python main.py detect-mislabels --clustering-methods "kmeans,dbscan" --outlier-methods "lof,isolation_forest"
+
+# High confidence suspects only (flagged by 2+ methods)
+python main.py detect-mislabels --min-confidence 2
+
+# Skip certain analysis types
+python main.py detect-mislabels --no-features  # Skip engineered features
+python main.py detect-mislabels --no-raw-spectral  # Skip raw spectral analysis
+```
+
+**Detection Methods:**
+- **Clustering-based**: K-means, DBSCAN, Hierarchical clustering on both raw spectral and engineered features
+- **Outlier detection**: Local Outlier Factor (LOF) and Isolation Forest
+- **Concentration consistency**: Identifies samples that don't fit their cluster's concentration pattern
+- **Parallel processing**: Supports `--feature-parallel` and `--data-parallel` for faster analysis
+
+**Output:**
+- Interactive visualizations showing cluster patterns and suspect locations
+- Detailed suspect lists with confidence scores
+- CSV files with sample IDs for exclusion from training
+- Analysis reports with recommendations
+
+**Complete Workflow Example:**
+1. Run detection on your dataset:
+   ```bash
+   python main.py detect-mislabels --focus-min 0.0 --focus-max 0.5 --min-confidence 2
+   ```
+
+2. Review visualizations in `reports/mislabel_analysis/`
+
+3. Manually inspect high-confidence suspects in the generated CSV files
+
+4. Use exported sample ID lists to exclude suspects from training:
+   ```bash
+   # Train without suspicious samples
+   python main.py train --gpu --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
+
+   # Or optimize models without suspicious samples
+   python main.py optimize-models --models xgboost lightgbm --strategy full_context --trials 200 --gpu \
+     --exclude-suspects reports/mislabel_analysis/suspicious_samples_min_confidence_2.csv
+   ```
+
+5. Compare model performance with and without suspicious samples to validate the improvement
+
 ## Architecture Overview
 
 ### Core Pipeline Flow
@@ -100,14 +270,14 @@ rm -rf bad_files/* bad_prediction_files/* logs/* reports/* catboost_info/
 
 - **Configuration** (`src/config/pipeline_config.py`): Centralized Pydantic-based configuration defining spectral regions, model parameters, and processing options
 - **Data Management** (`src/data_management/`): Handles file I/O, averaging, splitting, and reference data integration
-- **Feature Engineering** (`src/features/`): Three strategies - Mg_only (magnesium peaks), simple_only (basic features), full_context (all spectral regions)
+- **Feature Engineering** (`src/features/`): Three strategies - K_only (potassium peaks), simple_only (basic features), full_context (all spectral regions)
 - **Model Training** (`src/models/`): Supports standard ML models and AutoGluon ensemble learning with GPU support
 - **Spectral Processing** (`src/spectral_extraction/`): Peak extraction, Lorentzian fitting, and baseline correction
 
 ### Feature Engineering Strategies
-- **Mg_only**: Focus on magnesium spectral regions (213-215nm and 253-256nm)
+- **K_only**: Focus on potassium spectral regions (766-770nm and 404nm)
 - **simple_only**: Basic spectral features without complex transformations
-- **full_context**: All spectral regions including C, H, O, N, P, and molecular bands
+- **full_context**: All spectral regions including C, H, O, N, P, Mg, and molecular bands
 
 ### Model Types
 - Standard models: Ridge, Lasso, Random Forest, XGBoost, LightGBM, CatBoost, SVR, ExtraTrees
@@ -140,3 +310,4 @@ data/
 - `logs/`: Execution logs with timestamps
 - `bad_files/`: Files rejected during cleansing
 - `bad_prediction_files/`: Files that failed during prediction
+- please always use a timeout of at least 5 minutes when executing python commands

@@ -8,10 +8,12 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "python": "${workspaceFolder}/.venv/bin/python",
-            "justMyCode": true
+            "justMyCode": 90ẞǴHJKLÖ⁺
         }
     ]
 }
+
+
 
 
 

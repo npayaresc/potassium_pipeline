@@ -13,9 +13,10 @@ import warnings
 
 from .peak_shapes import PeakShapes
 from .results import (
-    PeakRegion, PeakFitResult, RegionExtractionResult, 
+    PeakRegion, PeakFitResult, RegionExtractionResult,
     FittingResult, FeatureExtractionResult
 )
+from .preprocessing import SpectralPreprocessor
 
 
 class SpectralFeatureExtractor:
@@ -32,17 +33,40 @@ class SpectralFeatureExtractor:
         peak_shapes (PeakShapes): Instance for accessing peak shape functions
     """
     
-    def __init__(self):
-        """Initialize the feature extractor."""
+    def __init__(self, enable_preprocessing: bool = False, preprocessing_method: str = 'savgol+snv'):
+        """
+        Initialize the feature extractor.
+
+        Args:
+            enable_preprocessing: Whether to apply spectral preprocessing before peak extraction
+            preprocessing_method: Preprocessing method to use if enabled:
+                - 'none': No preprocessing
+                - 'savgol': Savitzky-Golay smoothing only
+                - 'snv': SNV normalization only
+                - 'savgol+snv': Smoothing + normalization (RECOMMENDED Phase 1)
+                - 'baseline+snv': ALS baseline + normalization
+                - 'full': All steps (ALS + smoothing + SNV) (Phase 2)
+        """
         self.peak_shapes = PeakShapes()
-        
+
         # Default fitting tolerances
         self.fit_tolerances = {
             'ftol': 1e-7,    # Function tolerance
-            'gtol': 1e-7,    # Gradient tolerance  
+            'gtol': 1e-7,    # Gradient tolerance
             'xtol': 1e-7,    # Parameter tolerance
             'max_nfev': 1000 # Maximum function evaluations
         }
+
+        # Preprocessing setup
+        self.enable_preprocessing = enable_preprocessing
+        self.preprocessor = SpectralPreprocessor()
+        if enable_preprocessing:
+            self.preprocessor.configure(method=preprocessing_method)
+            warnings.warn(
+                f"Spectral preprocessing ENABLED: {preprocessing_method}. "
+                f"This will be applied BEFORE peak isolation and baseline correction.",
+                UserWarning
+            )
     
     def isolate_peaks(self, 
                      wavelengths: np.ndarray,
@@ -84,8 +108,16 @@ class SpectralFeatureExtractor:
             # Extract region data
             region_wavelengths = wavelengths[region_indices]
             region_spectra = spectra[region_indices, :]
-            
-            # Apply baseline correction if requested
+
+            # STEP 1: Apply spectral preprocessing if enabled (NEW!)
+            # This happens BEFORE baseline correction for optimal results
+            if self.enable_preprocessing:
+                region_spectra = self.preprocessor.preprocess_batch(
+                    region_spectra,
+                    region_wavelengths
+                )
+
+            # STEP 2: Apply baseline correction if requested (existing code)
             corrected_spectra = region_spectra.copy()
             if baseline_correction:
                 corrected_spectra = self._apply_baseline_correction(
@@ -432,7 +464,7 @@ class SpectralFeatureExtractor:
         
         return guess
     
-    def _extract_peak_parameters(self, 
+    def _extract_peak_parameters(self,
                                 wavelengths: np.ndarray,
                                 spectrum: np.ndarray,
                                 fit_result: OptimizeResult,
@@ -446,7 +478,7 @@ class SpectralFeatureExtractor:
             height = np.max(spectrum)
             width = wavelengths[-1] - wavelengths[0]
             center = centers[0] if centers else np.mean(wavelengths)
-            
+
             return [PeakFitResult(
                 height=height,
                 width=width,
@@ -458,10 +490,10 @@ class SpectralFeatureExtractor:
                 residuals=np.zeros_like(spectrum),
                 fitted_curve=spectrum.copy()
             )]
-        
+
         # Parse fitted parameters
         params = np.abs(fit_result.x)
-        
+
         # Determine parameter structure based on shape
         if 'voigt' in shape.lower():
             n_params_per_peak = 4 if 'fixed' not in shape.lower() else 3
@@ -469,10 +501,10 @@ class SpectralFeatureExtractor:
             n_params_per_peak = 3 if 'fixed' not in shape.lower() else 2
             if 'asymmetric' in shape.lower() or 'asym' in shape.lower():
                 n_params_per_peak += 1
-        
+
         # Split parameters for each peak
         param_groups = np.array_split(params, n_peaks)
-        
+
         results = []
         for i, peak_params in enumerate(param_groups):
             if 'voigt' in shape.lower():
@@ -480,11 +512,17 @@ class SpectralFeatureExtractor:
                 center = peak_params[3] if len(peak_params) > 3 else centers[i]
                 width = self.peak_shapes.calculate_fwhm(width_l, width_g, shape)
                 height = np.max(spectrum)  # Approximate for Voigt
+                gamma = width_l  # Lorentzian component
+                amplitude = height
             else:
                 height, width = peak_params[:2]
                 center = peak_params[2] if len(peak_params) > 2 else centers[i]
                 area = self.peak_shapes.calculate_peak_area(height, width, shape)
-            
+
+                # For Lorentzian: width is gamma (half-width at half-maximum)
+                gamma = width
+                amplitude = height
+
             # Generate fitted curve for this peak
             try:
                 if 'voigt' in shape.lower():
@@ -495,10 +533,37 @@ class SpectralFeatureExtractor:
                     fitted_curve = self.peak_shapes.lorentzian(wavelengths, height, width, center)
             except:
                 fitted_curve = np.zeros_like(wavelengths)
-            
+
             # Calculate residuals
             residuals = spectrum - fitted_curve
-            
+
+            # === PHYSICS-INFORMED PARAMETERS (NEW) ===
+
+            # 1. FWHM (Full Width at Half Maximum)
+            # For Lorentzian: FWHM = 2 * gamma
+            # For Gaussian: FWHM = 2 * sqrt(2*ln(2)) * sigma ≈ 2.355 * sigma
+            if 'lorentzian' in shape.lower():
+                fwhm = 2.0 * gamma
+            elif 'gaussian' in shape.lower():
+                fwhm = 2.355 * width  # width is sigma for Gaussian
+            elif 'voigt' in shape.lower():
+                fwhm = self.peak_shapes.calculate_fwhm(width_l, width_g, shape)
+            else:
+                fwhm = 2.0 * width  # Default approximation
+
+            # 2. Fit Quality (R²)
+            fit_quality = self._calculate_fit_quality(spectrum, fitted_curve)
+
+            # 3. Peak Asymmetry (from residuals)
+            peak_asymmetry = self._calculate_peak_asymmetry(
+                wavelengths, spectrum, fitted_curve, center
+            )
+
+            # 4. Peak Kurtosis (tailedness measure)
+            peak_kurtosis = self._calculate_peak_kurtosis(
+                wavelengths, spectrum, center
+            )
+
             result = PeakFitResult(
                 height=height,
                 width=width,
@@ -508,21 +573,190 @@ class SpectralFeatureExtractor:
                 success=fit_result.success,
                 n_function_evaluations=fit_result.nfev,
                 residuals=residuals,
-                fitted_curve=fitted_curve
+                fitted_curve=fitted_curve,
+                # Physics-informed parameters
+                fwhm=fwhm,
+                gamma=gamma,
+                fit_quality=fit_quality,
+                peak_asymmetry=peak_asymmetry,
+                amplitude=amplitude,
+                kurtosis=peak_kurtosis
             )
-            
+
             results.append(result)
-        
+
         return results
     
+    def _calculate_fit_quality(self, spectrum: np.ndarray, fitted_curve: np.ndarray) -> float:
+        """
+        Calculate fit quality (R²) for a peak fit.
+
+        R² = 1 - (SS_res / SS_tot)
+        where SS_res = sum of squared residuals
+              SS_tot = total sum of squares
+
+        Args:
+            spectrum: Observed spectrum data
+            fitted_curve: Fitted model curve
+
+        Returns:
+            R² value (0 to 1, higher is better)
+        """
+        try:
+            # Calculate residual sum of squares
+            ss_res = np.sum((spectrum - fitted_curve) ** 2)
+
+            # Calculate total sum of squares
+            ss_tot = np.sum((spectrum - np.mean(spectrum)) ** 2)
+
+            # Calculate R²
+            if ss_tot > 1e-10:  # Avoid division by zero
+                r_squared = 1.0 - (ss_res / ss_tot)
+                # Clip to [0, 1] range (negative R² means terrible fit)
+                return max(0.0, min(1.0, r_squared))
+            else:
+                return 0.0
+        except:
+            return 0.0
+
+    def _calculate_peak_asymmetry(self,
+                                  wavelengths: np.ndarray,
+                                  spectrum: np.ndarray,
+                                  fitted_curve: np.ndarray,
+                                  center: float) -> float:
+        """
+        Calculate peak asymmetry from fit residuals.
+
+        Asymmetry indicates self-absorption (reabsorption) in LIBS:
+        - Positive asymmetry: right-skewed (typical for self-absorption)
+        - Negative asymmetry: left-skewed
+        - Zero: symmetric peak
+
+        Physical interpretation:
+        - High asymmetry (>0.3) suggests self-absorption at high concentration
+        - Low asymmetry (<0.1) suggests optically thin plasma
+
+        Args:
+            wavelengths: Wavelength array
+            spectrum: Observed spectrum
+            fitted_curve: Fitted Lorentzian curve
+            center: Peak center wavelength
+
+        Returns:
+            Asymmetry index (-1 to 1)
+        """
+        try:
+            # Find peak center index
+            peak_idx = np.argmin(np.abs(wavelengths - center))
+
+            if peak_idx < 2 or peak_idx >= len(wavelengths) - 2:
+                return 0.0  # Too close to edge
+
+            # Method 1: FWHM-based asymmetry (more robust)
+            peak_intensity = spectrum[peak_idx]
+            half_max = peak_intensity / 2.0
+
+            # Find left and right half-maximum points
+            left_indices = np.where((wavelengths < center) & (spectrum >= half_max))[0]
+            right_indices = np.where((wavelengths > center) & (spectrum >= half_max))[0]
+
+            if len(left_indices) > 0 and len(right_indices) > 0:
+                # Calculate widths on each side
+                left_width = center - wavelengths[left_indices[0]]
+                right_width = wavelengths[right_indices[-1]] - center
+
+                # Asymmetry = (right - left) / (right + left)
+                # Range: -1 (left-skewed) to +1 (right-skewed)
+                if (right_width + left_width) > 1e-10:
+                    asymmetry = (right_width - left_width) / (right_width + left_width)
+                    return np.clip(asymmetry, -1.0, 1.0)
+
+            # Method 2: Residual-based asymmetry (fallback)
+            residuals = spectrum - fitted_curve
+            left_residuals = residuals[:peak_idx]
+            right_residuals = residuals[peak_idx:]
+
+            if len(left_residuals) > 0 and len(right_residuals) > 0:
+                residual_std = np.std(residuals)
+                if residual_std > 1e-10:
+                    asymmetry = (np.mean(right_residuals) - np.mean(left_residuals)) / residual_std
+                    return np.clip(asymmetry, -1.0, 1.0)
+
+            return 0.0
+
+        except:
+            return 0.0
+
+    def _calculate_peak_kurtosis(self,
+                                 wavelengths: np.ndarray,
+                                 spectrum: np.ndarray,
+                                 center: float) -> float:
+        """
+        Calculate peak kurtosis (fourth moment about the mean).
+
+        Kurtosis measures the "tailedness" of the peak distribution:
+        - Excess kurtosis > 0: Heavy tails, sharp peak (leptokurtic)
+        - Excess kurtosis < 0: Light tails, flat peak (platykurtic)
+        - Excess kurtosis ≈ 0: Similar to Gaussian (mesokurtic)
+
+        Physical interpretation for LIBS:
+        - High kurtosis: Intense, localized emission (good signal)
+        - Low kurtosis: Diffuse emission or noise-dominated signal
+        - Negative kurtosis: Possible saturation or detector artifacts
+
+        Args:
+            wavelengths: Wavelength array
+            spectrum: Observed spectrum intensity
+            center: Peak center wavelength
+
+        Returns:
+            Excess kurtosis value (kurtosis - 3)
+        """
+        try:
+            # Find peak center index
+            peak_idx = np.argmin(np.abs(wavelengths - center))
+
+            if peak_idx < 2 or peak_idx >= len(wavelengths) - 2:
+                return 0.0  # Too close to edge
+
+            # Normalize spectrum to use as a probability distribution
+            spectrum_positive = spectrum - np.min(spectrum)  # Shift to positive
+            total_intensity = np.sum(spectrum_positive)
+
+            if total_intensity < 1e-10:
+                return 0.0  # No signal
+
+            # Treat intensity as probability weights
+            weights = spectrum_positive / total_intensity
+
+            # Calculate weighted moments
+            mean_wavelength = np.sum(weights * wavelengths)
+            variance = np.sum(weights * (wavelengths - mean_wavelength) ** 2)
+
+            if variance < 1e-10:
+                return 0.0  # No spread
+
+            # Calculate fourth moment (kurtosis)
+            fourth_moment = np.sum(weights * (wavelengths - mean_wavelength) ** 4)
+            kurtosis = fourth_moment / (variance ** 2)
+
+            # Return excess kurtosis (kurtosis - 3 for Gaussian reference)
+            excess_kurtosis = kurtosis - 3.0
+
+            # Clip to reasonable range (-10 to +10)
+            return np.clip(excess_kurtosis, -10.0, 10.0)
+
+        except Exception as e:
+            return 0.0
+
     def _average_peak_results(self, all_results: List[List[PeakFitResult]]) -> List[PeakFitResult]:
         """Average peak results across multiple spectra."""
         if not all_results:
             return []
-        
+
         n_peaks = len(all_results[0])
         averaged = []
-        
+
         for peak_idx in range(n_peaks):
             # Collect parameters for this peak across all spectra
             heights = [results[peak_idx].height for results in all_results]
@@ -531,7 +765,15 @@ class SpectralFeatureExtractor:
             centers = [results[peak_idx].center for results in all_results]
             successes = [results[peak_idx].success for results in all_results]
             n_evals = [results[peak_idx].n_function_evaluations for results in all_results]
-            
+
+            # NEW: Collect physics-informed parameters
+            fwhms = [results[peak_idx].fwhm for results in all_results]
+            gammas = [results[peak_idx].gamma for results in all_results]
+            fit_qualities = [results[peak_idx].fit_quality for results in all_results]
+            asymmetries = [results[peak_idx].peak_asymmetry for results in all_results]
+            amplitudes = [results[peak_idx].amplitude for results in all_results]
+            kurtoses = [results[peak_idx].kurtosis for results in all_results]
+
             # Calculate averages
             avg_result = PeakFitResult(
                 height=np.mean(heights),
@@ -542,11 +784,18 @@ class SpectralFeatureExtractor:
                 success=np.mean(successes) > 0.5,
                 n_function_evaluations=int(np.mean(n_evals)),
                 residuals=np.mean([res[peak_idx].residuals for res in all_results], axis=0),
-                fitted_curve=np.mean([res[peak_idx].fitted_curve for res in all_results], axis=0)
+                fitted_curve=np.mean([res[peak_idx].fitted_curve for res in all_results], axis=0),
+                # Physics-informed averages
+                fwhm=np.mean(fwhms),
+                gamma=np.mean(gammas),
+                fit_quality=np.mean(fit_qualities),
+                peak_asymmetry=np.mean(asymmetries),
+                amplitude=np.mean(amplitudes),
+                kurtosis=np.mean(kurtoses)
             )
-            
+
             averaged.append(avg_result)
-        
+
         return averaged
 
     def _perform_trapezoidal_integration(self, region_result: RegionExtractionResult) -> FittingResult:

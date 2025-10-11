@@ -1,5 +1,5 @@
 """
-Centralized Configuration Management for the ML Pipeline.
+Centralized Configuration Management for the Potassium Prediction ML Pipeline.
 
 Uses Pydantic for data validation and clear structure.
 """
@@ -36,7 +36,7 @@ class ModelParamsConfig(BaseModel):
         "n_estimators": 500,        # Increased for complex patterns
         "learning_rate": 0.03,      # Lower for stable learning
         "max_depth": 6,             # Increased to capture interactions
-        "min_child_weight": 1,      # Reduced for small dataset
+        "min_child_weight": 5,      # Increased to prevent overfitting on 720 samples
         "subsample": 0.9,           # Higher sampling
         "colsample_bytree": 0.9,    # Higher feature sampling
         "colsample_bylevel": 0.9,   # Add level sampling
@@ -79,28 +79,28 @@ class ModelParamsConfig(BaseModel):
     
     # Neural Network parameters - optimized for small spectroscopic datasets
     neural_network: Dict[str, Any] = {
-        "model_type": "full",       # 4-layer architecture from AutoGluon NeuralNetTorch_r1_BAG_L1 (score: -0.074333)
-        "epochs": 1000,             # From AutoGluon optimization (best performing model)
-        "batch_size": 128,          # Reasonable batch size (AutoGluon used 512 max)
-        "learning_rate": 0.00311256, # From AutoGluon optimization
-        "weight_decay": 4.57e-08,   # From AutoGluon optimization  
+        "model_type": "full",       # 5-layer architecture (dynamic based on input dim)
+        "epochs": 300,              # Reduced to avoid overfitting on small dataset
+        "batch_size": 64,           # Smaller batch for 580 samples
+        "learning_rate": 0.001,     # Standard learning rate (AutoGluon value too high for small dataset)
+        "weight_decay": 0.001,      # Moderate regularization (AutoGluon value too small)
         "dropout_rate": 0.237138,   # From AutoGluon optimization
         "hidden_size": 200,         # From AutoGluon optimization (4 layers × 200 units)
         "num_layers": 4,            # From AutoGluon optimization
         "early_stopping_patience": 50,  # Good patience for this architecture
         "verbose": True,
-        "use_sample_weights": True  # ENABLED: Critical for extreme concentration ranges
+        "use_sample_weights": False  # Use custom loss weighting only (avoid double-weighting)
     }
     neural_network_light: Dict[str, Any] = {
         "model_type": "light",      # Lightweight version
-        "epochs": 120,              # Sufficient for convergence
+        "epochs": 200,              # More epochs for better convergence
         "batch_size": 32,           # Stable batch size
-        "learning_rate": 0.0005,    # Even lower learning rate for stability
-        "weight_decay": 0.02,       # Higher regularization for overfitting prevention
-        "dropout_rate": 0.5,        # High dropout for small dataset
-        "early_stopping_patience": 25,  # Adequate patience
+        "learning_rate": 0.001,     # Standard learning rate
+        "weight_decay": 0.01,       # Moderate regularization
+        "dropout_rate": 0.3,        # Moderate dropout (0.5 was too high)
+        "early_stopping_patience": 40,  # More patience for convergence
         "verbose": True,
-        "use_sample_weights": True  # ENABLED: Critical for extreme concentration ranges
+        "use_sample_weights": False  # Use custom loss weighting only (avoid double-weighting)
     }
     neural_network_autogluon: Dict[str, Any] = {
         "model_type": "autogluon",  # AutoGluon-optimized architecture
@@ -111,7 +111,7 @@ class ModelParamsConfig(BaseModel):
         "dropout_rate": 0.3,        # Lower dropout for larger network
         "early_stopping_patience": 30,  # More patience for larger model
         "verbose": True,
-        "use_sample_weights": True  # ENABLED: Critical for extreme concentration ranges (< 0.25% and > 0.45%)
+        "use_sample_weights": False  # Use custom loss weighting only (avoid double-weighting)
     }
     
     # AutoGluon parameters for model trainer integration
@@ -141,10 +141,10 @@ class ObjectiveConfig(BaseModel):
     use_data_driven_thresholds: bool = True
     
     # Fixed thresholds (used when use_data_driven_thresholds=False)
-    # Based on magnesium concentration ranges (0.1-0.5% typical)
-    low_concentration_threshold: float = 0.15  # 15% P - low end
-    medium_concentration_threshold: float = 0.35  # 35% P - high end
-    high_concentration_threshold: float = 0.45  # 45% P - very high
+    # Based on potassium concentration ranges (typical values)
+    low_concentration_threshold: float = 0.15  # 15% K - low end
+    medium_concentration_threshold: float = 0.35  # 35% K - high end
+    high_concentration_threshold: float = 0.45  # 45% K - very high
     
     # Weight values for different concentration ranges
     low_concentration_weight: float = 4.0  # Higher weight for rare low concentrations
@@ -376,7 +376,7 @@ class ParallelConfig(BaseModel):
 class TunerConfig(BaseModel):
     """Configuration for the Optuna hyperparameter tuner."""
     n_trials: int = 400
-    timeout: int = 12000
+    timeout: int = 120
     #models_to_tune: List[str] = ["random_forest", "xgboost", "lightgbm", "catboost", "svr", "extratrees"]
     models_to_tune: List[str] = ["extratrees"]
     # Use this to select the tuning goal.
@@ -422,11 +422,11 @@ class AutoGluonConfig(BaseModel):
     # Sample weighting configuration - NOW ENABLED (from best run but with sample weights)
     weight_method: Literal['legacy', 'improved'] = 'improved'
     
-    time_limit: int = 10800  # 3 hours for thorough optimization
+    time_limit: int = 12000  # 3 hours for thorough optimization
     presets: str = 'good_quality'  # From best AutoGluon run configuration
     
     # GPU-safe preset switching - automatically use good_quality when GPU is enabled
-    gpu_safe_preset: str = 'good_quality'  # Fallback preset for GP
+    gpu_safe_preset: str = 'extreme_quality'  # Fallback preset for GP
     model_subdirectory: str = "autogluon"
     num_trials: int = 100  # Increased trials for better hyperparameter search
     
@@ -442,7 +442,7 @@ class AutoGluonConfig(BaseModel):
     ag_args_ensemble: Dict[str, Any] = {
         'fold_fitting_strategy': 'sequential_local',
     }
-    excluded_model_types: List[str] = ['KNN', 'FASTAI', 'TABPFN', 'FASTTEXT']  # From best AutoGluon run configuration
+    excluded_model_types: List[str] = ['FASTAI', 'FASTTEXT']  # From best AutoGluon run configuration
     
     # GPU-specific exclusions - models that commonly fail with GPU + best_quality
     gpu_excluded_models: List[str] = []  # Add models here if they consistently fail with GPU
@@ -544,7 +544,7 @@ class AutoGluonConfig(BaseModel):
 
 class Config(BaseModel):
     """Main configuration class for the entire pipeline."""
-    project_name: str = "MagnesiumPrediction"
+    project_name: str = "PotassiumPrediction"
     run_timestamp: str
     random_state: int = 42
     use_gpu: bool = False  # Global GPU flag
@@ -563,15 +563,15 @@ class Config(BaseModel):
     _reference_data_path: str
     
     # --- Data Management ---
-    target_column: str = "Magnesium %"
+    target_column: str = "K 766.490\n(wt%)"
     sample_id_column: str = "Sample ID"
     exclude_pot_samples: bool = False
     test_split_size: float = 0.20
     max_samples: Optional[int] = None
     
     # ADDED: Configuration for target value filtering - focused on 0.2-0.5 range
-    target_value_min: Optional[float] = None # Focus closer to target range for better 0.2-0.5 performance
-    target_value_max: Optional[float] = None  # Focus closer to target range for better 0.2-0.5 performance
+    target_value_min: Optional[float] = 2.0 # Focus closer to target range for better 0.2-0.5 performance
+    target_value_max: Optional[float] = 15.0  # Focus closer to target range for better 0.2-0.5 performance
     
     # Custom validation set directory - if providedone, will process raw files from this directory for validation
     #custom_validation_dir: Optional[str] = "/home/payanico/magnesium_pipeline/data/raw/combo_6_8"
@@ -585,11 +585,18 @@ class Config(BaseModel):
     # Feature Selection Configuration - to handle high-dimension/low-sample scenario
     use_feature_selection: bool = True  # Enable/disable feature selection
     feature_selection_method: Literal['selectkbest', 'rfe', 'lasso', 'mutual_info', 'tree_importance'] = 'selectkbest'
-    n_features_to_select: Union[int, float] = 0.6  # Number of features to select (int) or fraction (float < 1.0)
-    feature_selection_score_func: Literal['f_regression', 'mutual_info_regression'] = 'f_regression'  # For SelectKBest
-    rfe_estimator: Literal['random_forest', 'xgboost', 'lightgbm'] = 'random_forest'  # For RFE
+    n_features_to_select: Union[int, float] = 80 # Number of features to select (int) or fraction (float < 1.0)
+    feature_selection_score_func: Literal['f_regression', 'mutual_info_regression'] = 'f_regression'
+    # For SelectKBest
+    rfe_estimator: Literal['random_forest', 'xgboost', 'lightgbm'] = 'lightgbm'  # For RFE
     lasso_alpha: float = 0.01  # Alpha parameter for LASSO feature selection
     tree_importance_threshold: float = 0.001  # Minimum feature importance threshold
+
+    # SHAP-Based Feature Selection (overrides use_feature_selection if enabled)
+    use_shap_feature_selection: bool = False  # Enable SHAP-based feature selection
+    shap_importance_file: Optional[str] = "models/K_only_catboost_20251009_141347_shap_importance.csv"  # Path to SHAP importance CSV file (e.g., "models/full_context_lightgbm_*_shap_importance.csv")
+    shap_top_n_features: int = 40  # Number of top features to select based on SHAP importance
+    shap_min_importance: Optional[float] = None  # Minimum SHAP importance threshold (optional)
 
     # Outlier detection settings - RELAXED for more training data
     outlier_method: str = 'SAM'
@@ -607,45 +614,48 @@ class Config(BaseModel):
             raise ValueError("outlier_method must be 'SAM' or 'MAD'")
         return v.upper()
 
-    # Literature-verified Magnesium LIBS spectral lines:
+    # Literature-verified Potassium LIBS spectral lines:
     # According to NIST and LIBS literature:
-    # - 285.2 nm: Most prominent Mg I line (resonance line)
-    # - 383.8 nm: Strong Mg I line
-    # - 516.7-518.4 nm: Mg I triplet (516.7, 517.3, 518.4 nm)
-    # - 279.5-280.3 nm: Mg II ionic lines (279.55, 279.80, 280.27 nm)
+    # - 766.49 nm: Strongest K I line (resonance line)
+    # - 769.90 nm: Second strongest K I line
+    # - 404.41 nm: Strong K I violet line
+    # - 404.72 nm: K I violet line companion
     
-    # Primary magnesium region - Mg I triplet around 517 nm
-    # Original setting kept but commented for reference
+    # Primary potassium region - K I doublet around 766-770 nm
+    # Original magnesium setting kept but commented for reference
     # magnesium_region: PeakRegion = PeakRegion(
-    #     element="M_I", lower_wavelength=515.77, upper_wavelength=517.77, center_wavelengths=[516.77])
+    #     element="Mg_I", lower_wavelength=516.0, upper_wavelength=519.0, center_wavelengths=[516.7, 517.3, 518.4])
     
-    # Updated based on literature: Mg I triplet at 516.7, 517.3, 518.4 nm
-    magnesium_region: PeakRegion = PeakRegion(
-        element="M_I", lower_wavelength=516.0, upper_wavelength=519.0, center_wavelengths=[516.7, 517.3, 518.4])
+    # Updated for potassium: K I doublet at 766.49, 769.90 nm (strongest lines)
+    potassium_region: PeakRegion = PeakRegion(
+        element="K_I", lower_wavelength=765.0, upper_wavelength=771.0, center_wavelengths=[766.49, 769.90])
     
     
     context_regions: List[PeakRegion] = [
         PeakRegion(element="C_I", lower_wavelength=832.5, upper_wavelength=834.5, center_wavelengths=[833.5]),
         PeakRegion(element="CA_I_help", lower_wavelength=525.1, upper_wavelength=527.1, center_wavelengths=[526.1]),
+        PeakRegion(element="CA_II_393", lower_wavelength=392.5, upper_wavelength=394.5, center_wavelengths=[393.37]),
         PeakRegion(element="N_I_help", lower_wavelength=741.0, upper_wavelength=743.0, center_wavelengths=[742.0]),
         
         # Original Mg secondary region (kept but can be refined)
         # PeakRegion(element="Mg_secondary", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[280.3]),
         
-        # Literature-based Mg II ionic lines (279.55, 279.80, 280.27 nm)
-        PeakRegion(element="Mg_II", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[279.55, 279.80, 280.27]),
+        # Additional potassium lines for better detection (NIST-precise wavelengths)
+        PeakRegion(element="K_I_404", lower_wavelength=403.5, upper_wavelength=405.5, center_wavelengths=[404.414, 404.721]),
+
+        # Additional K I red doublet (intensity = 800, less common but useful for cross-validation)
+        PeakRegion(element="K_I_691", lower_wavelength=690.5, upper_wavelength=694.5, center_wavelengths=[691.11, 693.88]),
+
+        # Keep magnesium lines for context and potential interference detection
+        PeakRegion(element="Mg_I_285", lower_wavelength=283.5, upper_wavelength=286.5, center_wavelengths=[285.2]),  # WIDENED: 1.5→3.0 nm
+        PeakRegion(element="Mg_I_383", lower_wavelength=382.0, upper_wavelength=385.0, center_wavelengths=[383.8]),  # WIDENED: 1.5→3.0 nm
+        PeakRegion(element="Mg_II", lower_wavelength=278.0, upper_wavelength=281.5, center_wavelengths=[279.55, 279.80, 280.27]),  # WIDENED: 2.0→3.5 nm (3 peaks)
         
-        # Most prominent Mg I line at 285.2 nm (adding as new region)
-        PeakRegion(element="Mg_I_285", lower_wavelength=284.5, upper_wavelength=286.0, center_wavelengths=[285.2]),
-        
-        # Strong Mg I line at 383.8 nm (adding as new region)  
-        PeakRegion(element="Mg_I_383", lower_wavelength=383.0, upper_wavelength=384.5, center_wavelengths=[383.8]),
-        
-        #PeakRegion(element="P_I_secondary", lower_wavelength=653.5, upper_wavelength=656.5, center_wavelengths=[654.5]),
-        PeakRegion(element="K_I_help", lower_wavelength=768.79, upper_wavelength=770.79, center_wavelengths=[769.79]),
+        # Phosphorous region - kept from original pipeline for reference and comparative feature engineering
+        PeakRegion(element="P_I_secondary", lower_wavelength=653.5, upper_wavelength=656.5, center_wavelengths=[654.5]),
     ]
     
-    # Enhanced spectral regions for crop magnesium prediction
+    # Enhanced spectral regions for crop potassium prediction
     # Molecular bands
     molecular_bands: List[PeakRegion] = [
         PeakRegion(element="CN_violet_1", lower_wavelength=385.0, upper_wavelength=390.0, center_wavelengths=[387.5]),
@@ -660,21 +670,18 @@ class Config(BaseModel):
         PeakRegion(element="S_I_2", lower_wavelength=868.0, upper_wavelength=870.0, center_wavelengths=[869.0]),
         PeakRegion(element="P_I", lower_wavelength=653.56, upper_wavelength=655.56, center_wavelengths=[654.56]),
         
-        # Original Mg lines kept commented for reference
-        #PeakRegion(element="Mg_I", lower_wavelength=515.7, upper_wavelength=517.7, center_wavelengths=[516.7]),
-        #PeakRegion(element="Mg_II", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[280.3]),
-        
-        # Note: Primary Mg lines are already defined in magnesium_region and context_regions
-        # to avoid duplication. If needed for macro_elements analysis, uncomment below:
-        # PeakRegion(element="Mg_I_macro", lower_wavelength=516.0, upper_wavelength=519.0, center_wavelengths=[516.7, 517.3, 518.4]),
-        # PeakRegion(element="Mg_II_macro", lower_wavelength=279.0, upper_wavelength=281.0, center_wavelengths=[279.55, 279.80, 280.27]),
+        # Note: Primary K lines are already defined in potassium_region and context_regions
+        # to avoid duplication. Mg lines kept for context and interference detection.
+        # Additional K lines for macro analysis if needed:
+        # PeakRegion(element="K_I_macro", lower_wavelength=765.0, upper_wavelength=771.0, center_wavelengths=[766.49, 769.90]),
+        # PeakRegion(element="K_I_404_macro", lower_wavelength=403.5, upper_wavelength=405.5, center_wavelengths=[404.41, 404.72]),
     ]
     
     # Micro elements
     micro_elements: List[PeakRegion] = [
         PeakRegion(element="Fe_I", lower_wavelength=437.5, upper_wavelength=439.5, center_wavelengths=[438.4]),
         PeakRegion(element="Fe_I_2", lower_wavelength=439.5, upper_wavelength=441.5, center_wavelengths=[440.5]),
-        PeakRegion(element="Mn_I", lower_wavelength=402.5, upper_wavelength=404.5, center_wavelengths=[403.4]),
+        PeakRegion(element="Mn_I", lower_wavelength=401.5, upper_wavelength=404.5, center_wavelengths=[403.08]),  # WIDENED: 0.8→3.0 nm (was too narrow for preprocessing)
         PeakRegion(element="B_I", lower_wavelength=248.5, upper_wavelength=250.5, center_wavelengths=[249.8]),
         PeakRegion(element="Zn_I", lower_wavelength=480.5, upper_wavelength=482.5, center_wavelengths=[481.1]),
         PeakRegion(element="Cu_I", lower_wavelength=323.5, upper_wavelength=325.5, center_wavelengths=[324.8]),
@@ -689,26 +696,45 @@ class Config(BaseModel):
         PeakRegion(element="H_beta", lower_wavelength=485.0, upper_wavelength=487.0, center_wavelengths=[486.1]),
     ]
     
-    # Feature configuration flags - OPTIMIZED FOR MAGNESIUM
-    enable_molecular_bands: bool = False   # CN/NH/NO bands can indicate organic matter affecting Mg
-    enable_macro_elements: bool = True    # S, Mg, Ca, K - critical for Mg interactions
-    enable_micro_elements: bool = True    # Fe, Mn, B, Zn - compete with Mg uptake
-    enable_oxygen_hydrogen: bool = False   # H/O ratios affect Mg compounds
-    enable_advanced_ratios: bool = True   # Mg/Ca, Mg/K ratios are critical
-    enable_spectral_patterns: bool = True # Peak shapes help identify Mg compounds
-    enable_interference_correction: bool = False  # Fe/Mn can interfere with Mg lines
+    # Feature configuration flags - OPTIMIZED FOR POTASSIUM
+    enable_molecular_bands: bool = False   # CN/NH/NO bands can indicate organic matter affecting K
+    enable_macro_elements: bool = True    # S, P, Ca, Mg - critical for K interactions
+    enable_micro_elements: bool = True    # Fe, Mn, B, Zn - compete with K uptake
+    enable_oxygen_hydrogen: bool = True   # H/O ratios affect K compounds
+    enable_advanced_ratios: bool = True   # K/Ca, K/Mg, K/P ratios are critical
+    enable_spectral_patterns: bool = True # Peak shapes help identify K compounds
+    enable_interference_correction: bool = True  # Fe/Mn can interfere with K lines
     enable_plasma_indicators: bool = False  # Not needed for concentration prediction
-    
-    # Magnesium feature generation method
-    use_focused_magnesium_features: bool = True  # If True, uses focused features; if False, uses original high-magnesium features
+        
+    # Potassium feature generation method
+    use_focused_potassium_features: bool = True  # If True, uses focused features; if False, uses original features
     
     # Raw spectral data mode - pass filtered intensities directly to models without feature engineering
     use_raw_spectral_data: bool = False  # If True, use raw intensities from PeakRegions instead of engineered features
 
+    # Spectral Preprocessing Configuration
+    use_spectral_preprocessing: bool = True  # Enable spectral preprocessing (Savgol, SNV, ALS baseline)
+    spectral_preprocessing_method: Literal['none', 'savgol', 'snv', 'baseline', 'savgol+snv', 'baseline+snv', 'full'] = 'full'  # Phase 1 recommended
+
+    def get_regions_for_strategy(self, strategy: str) -> List[PeakRegion]:
+        """Get spectral regions based on feature strategy."""
+        if strategy == "K_only":
+            # Only K regions + C for K_C_ratio
+            k_regions = [self.potassium_region]
+            k_regions.extend([r for r in self.context_regions if r.element.startswith("K_I")])
+            # Add C_I for K_C_ratio calculation
+            c_region = next((r for r in self.context_regions if r.element == "C_I"), None)
+            if c_region:
+                k_regions.append(c_region)
+            return k_regions
+        else:
+            # Full regions for simple_only and full_context
+            return self.all_regions
+
     @property
     def all_regions(self) -> List[PeakRegion]:
-        regions = [self.magnesium_region] + self.context_regions
-        
+        regions = [self.potassium_region] + self.context_regions
+
         # Add enabled enhanced regions
         if self.enable_molecular_bands:
             regions.extend(self.molecular_bands)
@@ -718,11 +744,11 @@ class Config(BaseModel):
             regions.extend(self.micro_elements)
         if self.enable_oxygen_hydrogen:
             regions.extend(self.oxygen_hydrogen)
-            
+
         return regions
 
-    #feature_strategies: List[str] = ["Mg_only", "simple_only", "full_context"]
-    feature_strategies: List[str] = ["simple_only"]
+    #feature_strategies: List[str] = ["K_only", "simple_only", "full_context"]
+    feature_strategies: List[str] = ["K_only"]
     peak_shapes: List[str] = ['lorentzian']
     fitting_mode: str = 'mean_first'
     baseline_correction: bool = True
@@ -731,7 +757,7 @@ class Config(BaseModel):
     #     "ridge", "lasso", "random_forest", "gradient_boost", "xgboost",
     #     "lightgbm", "catboost", "svr", "extratrees", "neural_network", "neural_network_light"
     # ]
-    models_to_train: List[str] = [ "extratrees"]
+    models_to_train: List[str] = [ "random_forest", "gradient_boost", "extratrees", "xgboost", "lightgbm", "catboost", "svr", "neural_network", "neural_network_light"]
     
     
     # Usage in pipeline_config.py:
@@ -794,7 +820,7 @@ class Config(BaseModel):
     sample_weight_method: Literal['legacy', 'improved', 'weighted_r2', 'distribution_based', 'hybrid'] = 'distribution_based'
     
     # Post-processing calibration for improving prediction accuracy
-    use_post_calibration: bool = True # Enable isotonic regression post-processing
+    use_post_calibration: bool = False # Disable isotonic regression post-processing (overfitting on test data)
     post_calibration_method: Literal['isotonic', 'linear', 'piecewise'] = 'isotonic'
     post_calibration_target: Literal['within_20.5', 'mape'] = 'within_20.5'  # Target metric to oeptimize
     
@@ -822,7 +848,7 @@ class Config(BaseModel):
     
     @property
     def raw_data_dir_path(self) -> Path:
-        return Path(self.__dict__.get('_raw_data_dir', f'{get_base_path()}/data/raw/data_5278_Phase3'))
+        return Path(self.__dict__.get('_raw_data_dir', f'{get_base_path()}/data/raw/latest_raw_data_091025'))
     
     @property
     def processed_data_dir_path(self) -> Path:
@@ -858,7 +884,7 @@ class Config(BaseModel):
     
     @property
     def reference_data_path_obj(self) -> Path:
-        return Path(self.__dict__.get('_reference_data_path', f'{get_base_path()}/data/reference_data/Final_Lab_Data_Nico_New.xlsx'))
+        return Path(self.__dict__.get('_reference_data_path', f'{get_base_path()}/data/reference_data/lab_Element_Rough_latest.xlsx'))
     
     # Properties that return Path objects for existing code compatibility
     @property 
@@ -867,7 +893,7 @@ class Config(BaseModel):
     
     @property
     def raw_data_dir(self) -> Path:
-        return Path(self.__dict__.get('_raw_data_dir', f'{get_base_path()}/data/raw/data_5278_Phase3'))
+        return Path(self.__dict__.get('_raw_data_dir', f'{get_base_path()}/data/raw/latest_raw_data_091025'))
     
     @property
     def processed_data_dir(self) -> Path:
@@ -903,7 +929,7 @@ class Config(BaseModel):
     
     @property
     def reference_data_path(self) -> Path:
-        return Path(self.__dict__.get('_reference_data_path', f'{get_base_path()}/data/reference_data/Final_Lab_Data_Nico_New.xlsx'))
+        return Path(self.__dict__.get('_reference_data_path', f'{get_base_path()}/data/reference_data/lab_Element_Rough_latest.xlsx'))
 
     def ensure_paths_exist(self, create_dirs: bool = True) -> None:
         """Ensure all required directories exist, optionally creating them."""
@@ -997,12 +1023,12 @@ BASE_PATH = get_base_path()
 config = Config(
     run_timestamp="placeholder", 
     _data_dir=str(BASE_PATH / "data"), 
-    _raw_data_dir=str(BASE_PATH / "data" / "raw" / "data_5278_Phase3"), 
+    _raw_data_dir=str(BASE_PATH / "data" / "raw" / "latest_raw_data_091025"), 
     _processed_data_dir=str(BASE_PATH / "data" / "processed"),
     _model_dir=str(BASE_PATH / "models"), 
     _reports_dir=str(BASE_PATH / "reports"), 
     _log_dir=str(BASE_PATH / "logs"), 
-    _reference_data_path=str(BASE_PATH / "data" / "reference_data" / "Final_Lab_Data_Nico_New.xlsx"), 
+    _reference_data_path=str(BASE_PATH / "data" / "reference_data" / "lab_Element_Rough_latest.xlsx"), 
     _bad_files_dir=str(BASE_PATH / "bad_files"), 
     _averaged_files_dir=str(BASE_PATH / "data" / "averaged_files_per_sample"), 
     _cleansed_files_dir=str(BASE_PATH / "data" / "cleansed_files_per_sample"), 

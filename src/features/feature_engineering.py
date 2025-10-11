@@ -15,8 +15,8 @@ from sklearn.impute import SimpleImputer
 
 from src.features.feature_helpers import (
     extract_full_simple_features,
-    generate_high_magnesium_features,
-    generate_focused_magnesium_features,
+    generate_high_potassium_features,
+    generate_focused_potassium_features,
 )
 from src.config.pipeline_config import Config, PeakRegion
 from src.spectral_extraction.extractor import SpectralFeatureExtractor
@@ -73,10 +73,10 @@ class PandasStandardScaler(BaseEstimator, TransformerMixin):
 
     def get_feature_names_out(self, input_features=None):
         """Return feature names for output features."""
-        if self.feature_names_in_ is not None:
-            return self.feature_names_in_
+        if self.feature_names_in_:
+            return np.array(self.feature_names_in_)
         elif input_features is not None:
-            return list(input_features)
+            return np.array(list(input_features))
         else:
             return None
 
@@ -92,7 +92,10 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
 
     def __init__(self, config: Config):
         self.config = config
-        self.extractor = SpectralFeatureExtractor()
+        self.extractor = SpectralFeatureExtractor(
+            enable_preprocessing=config.use_spectral_preprocessing,
+            preprocessing_method=config.spectral_preprocessing_method
+        )
         self.feature_names_out_: List[str] = []
 
     def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
@@ -113,7 +116,7 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
             region_results = self.extractor.isolate_peaks(
                 wavelengths,
                 intensities_2d,
-                _convert_to_results_regions(self.config.all_regions),
+                _convert_to_results_regions(self._regions),
                 baseline_correction=self.config.baseline_correction,
                 area_normalization=False,
             )
@@ -138,7 +141,7 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
             )
             # Fallback to estimated feature names
             self.feature_names_out_ = []
-            for region in self.config.all_regions:
+            for region in self._regions:
                 element = region.element
                 lower_wl = region.lower_wavelength
                 upper_wl = region.upper_wavelength
@@ -165,6 +168,22 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
         Returns:
             DataFrame with raw intensity values from PeakRegions
         """
+        # Handle numpy arrays from SHAP or other tools
+        if isinstance(X, np.ndarray):
+            logger.debug("Converting numpy array to DataFrame for raw spectral transformation")
+            # Check if this is a structured array with object dtype (array-valued columns)
+            if X.dtype == object and X.shape[1] == 2:
+                # Array-valued columns (wavelengths and intensities as arrays)
+                X = pd.DataFrame({
+                    "wavelengths": X[:, 0],
+                    "intensities": X[:, 1]
+                })
+            elif X.shape[1] == 2:
+                # Regular 2-column array
+                X = pd.DataFrame(X, columns=["wavelengths", "intensities"])
+            else:
+                raise ValueError(f"Expected 2 columns (wavelengths, intensities), got {X.shape[1]}")
+
         results = []
 
         for idx, row in X.iterrows():
@@ -187,63 +206,112 @@ class RawSpectralTransformer(BaseEstimator, TransformerMixin):
                 else:
                     intensities_2d = intensities
 
-                region_results = self.extractor.isolate_peaks(
-                    wavelengths,
-                    intensities_2d,
-                    _convert_to_results_regions(self.config.all_regions),
-                    baseline_correction=self.config.baseline_correction,
-                    area_normalization=False,  # Keep raw intensities
-                )
-
-                # Extract raw intensities (no mathematical feature engineering)
+                # Process regions one by one to handle missing data gracefully
                 raw_data = {}
 
-                for region_result in region_results:
-                    element = region_result.region.element
-                    region_wavelengths = region_result.wavelengths
-                    region_spectra = (
-                        region_result.isolated_spectra
-                    )  # Shape: (n_wavelengths, n_shots)
+                for region_config in self._regions:
+                    try:
+                        # Try to extract this specific region
+                        region_results = self.extractor.isolate_peaks(
+                            wavelengths,
+                            intensities_2d,
+                            _convert_to_results_regions([region_config]),
+                            baseline_correction=self.config.baseline_correction,
+                            area_normalization=False,  # Keep raw intensities
+                        )
 
-                    # Average across shots (columns) to get single intensity per wavelength
-                    if region_spectra.ndim == 2:
-                        region_intensities = region_spectra.mean(
-                            axis=1
-                        )  # Average across shots
-                    else:
-                        region_intensities = region_spectra.flatten()
+                        # Process the single region result
+                        region_result = region_results[0]
+                        element = region_result.region.element
+                        region_wavelengths = region_result.wavelengths
+                        region_spectra = region_result.isolated_spectra  # Shape: (n_wavelengths, n_shots)
 
-                    # Add each wavelength point as a separate feature
-                    for i, (wl, intensity) in enumerate(
-                        zip(region_wavelengths, region_intensities)
-                    ):
-                        feature_name = f"{element}_wl_{wl:.2f}nm"
-                        raw_data[feature_name] = intensity
+                        # Average across shots (columns) to get single intensity per wavelength
+                        if region_spectra.ndim == 2:
+                            region_intensities = region_spectra.mean(axis=1)  # Average across shots
+                        else:
+                            region_intensities = region_spectra.flatten()
+
+                        # Check for NaN values in the averaged intensities
+                        if np.isnan(region_intensities).any():
+                            nan_mask = np.isnan(region_intensities)
+                            logger.debug("Found %d NaN values after averaging in %s region for sample %s",
+                                       np.sum(nan_mask), element, idx)
+                            region_intensities = np.nan_to_num(region_intensities, nan=0.0)
+
+                        # Add each wavelength point as a separate feature
+                        for wl, intensity in zip(region_wavelengths, region_intensities):
+                            feature_name = f"{element}_wl_{wl:.2f}nm"
+                            # Ensure no NaN values are stored
+                            if np.isnan(intensity):
+                                raw_data[feature_name] = 0.0
+                            else:
+                                raw_data[feature_name] = intensity
+
+                    except ValueError as e:
+                        # Region not found in spectrum - fill with zeros for this region
+                        element = region_config.element
+                        logger.debug("Region %s not found for sample %s: %s", element, idx, e)
+
+                        # Fill expected features for this region with zeros
+                        for feature_name in self.feature_names_out_:
+                            if feature_name.startswith(f"{element}_wl_"):
+                                raw_data[feature_name] = 0.0
 
                 results.append(raw_data)
 
             except Exception as e:
-                logger.warning("Error processing sample %s: %s, using NaN values", idx, e)
-                raw_data = {name: np.nan for name in self.feature_names_out_}
+                logger.warning("Error processing sample %s: %s, filling with zeros instead of NaN", idx, e)
+                logger.warning("Failed to extract %d features for sample %s: %s",
+                             len(self.feature_names_out_), idx, list(self.feature_names_out_)[:10])
+                raw_data = {name: 0.0 for name in self.feature_names_out_}
                 results.append(raw_data)
 
         # Create DataFrame with safe index handling
         index_to_use = X.index if hasattr(X, 'index') else None
         df_result = pd.DataFrame(results, index=index_to_use)
 
-        # Ensure all expected columns are present (fill missing with NaN)
+        # Ensure all expected columns are present (fill missing with zeros)
+        missing_features = []
         for col in self.feature_names_out_:
             if col not in df_result.columns:
-                df_result[col] = np.nan
+                df_result[col] = 0.0
+                missing_features.append(col)
+
+        if missing_features:
+            logger.warning("Missing %d features during raw intensity extraction, filled with zeros: %s",
+                         len(missing_features), missing_features[:10])
 
         # Reorder columns to match expected feature names
         df_result = df_result.reindex(
-            columns=self.feature_names_out_, fill_value=np.nan
+            columns=self.feature_names_out_, fill_value=0.0
         )
+
+        # Final NaN check in raw spectral extraction
+        if df_result.isnull().any().any():
+            nan_count = df_result.isnull().sum().sum()
+            nan_cols = df_result.columns[df_result.isnull().any()].tolist()
+
+            # Group NaN columns by element for clearer reporting
+            elements_with_nan = {}
+            for col in nan_cols:
+                element = col.split('_wl_')[0]
+                if element not in elements_with_nan:
+                    elements_with_nan[element] = []
+                elements_with_nan[element].append(col)
+
+            # Log a warning instead of error, as this is handled gracefully
+            logger.warning("[RAW SPECTRAL] Found %d NaN values in %d features across %d elements",
+                          nan_count, len(nan_cols), len(elements_with_nan))
+            logger.debug("Elements with missing data: %s", list(elements_with_nan.keys()))
+
+            # Fill NaN values with 0.0 (standard imputation for missing spectral regions)
+            df_result = df_result.fillna(0.0)
+            logger.info("Filled missing spectral regions with 0.0 (standard imputation)")
 
         logger.info(
             "Extracted %d raw intensity features from %d PeakRegions.",
-            df_result.shape[1], len(self.config.all_regions)
+            df_result.shape[1], len(self._regions)
         )
         return df_result
 
@@ -258,10 +326,17 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
     def __init__(self, config: Config, strategy: str = "simple_only"):
         self.config = config
         self.strategy = strategy
-        self.extractor = SpectralFeatureExtractor()
+        self.extractor = SpectralFeatureExtractor(
+            enable_preprocessing=config.use_spectral_preprocessing,
+            preprocessing_method=config.spectral_preprocessing_method
+        )
         self.feature_names_out_: List[str] = []
         self._all_simple_names = []
-        self._high_p_names = []
+        self._high_k_names = []
+
+        # Strategy-optimized regions to avoid extracting unused features
+        self._regions = self._get_strategy_regions()
+
         # Initialize enhanced features if any are enabled
         self._use_enhanced = any(
             [
@@ -275,6 +350,44 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         if self._use_enhanced:
             self.enhanced_features = EnhancedSpectralFeatures(config)
 
+    def _get_strategy_regions(self) -> List[PeakRegion]:
+        """Get regions optimized for current strategy."""
+        if self.strategy == "K_only":
+            # K regions + essential context elements for meaningful ratios
+            k_regions = [self.config.potassium_region]
+            k_regions.extend([r for r in self.config.context_regions if r.element.startswith("K_I")])
+
+            # Add C_I for K_C_ratio calculation (baseline normalization)
+            c_region = next((r for r in self.config.context_regions if r.element == "C_I"), None)
+            if c_region:
+                k_regions.append(c_region)
+
+            # Add critical elements for agronomic ratios (Ca, N, P, S for nutrient balance)
+            critical_elements = ['CA_I_help', 'CA_II_393', 'N_I_help', 'P_I_secondary']
+            for element in critical_elements:
+                region = next((r for r in self.config.context_regions if r.element == element), None)
+                if region:
+                    k_regions.append(region)
+
+            # Add S_I from macro_elements (secondary nutrient)
+            s_region = next((r for r in self.config.macro_elements if r.element == "S_I"), None)
+            if s_region:
+                k_regions.append(s_region)
+
+            # Optional: Add Mg for complete cation analysis (can remove if too many features)
+            mg_elements = ['Mg_I_285', 'Mg_II']
+            for element in mg_elements:
+                region = next((r for r in self.config.context_regions if r.element == element), None)
+                if region:
+                    k_regions.append(region)
+
+            logger.info(f"K_only strategy: using {len(k_regions)} regions (vs {len(self.config.all_regions)} total)")
+            logger.info(f"Regions: {[r.element for r in k_regions]}")
+            return k_regions
+        else:
+            # Full regions for simple_only and full_context
+            return self.config.all_regions
+
     def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None):
         """Fits the transformer by determining the canonical feature names."""
         self._set_feature_names(
@@ -285,6 +398,22 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
         """Transforms raw spectral data into the final feature matrix."""
+        # Handle numpy arrays from SHAP or other tools
+        if isinstance(X, np.ndarray):
+            logger.debug("Converting numpy array to DataFrame for feature transformation")
+            # Check if this is a structured array with object dtype (array-valued columns)
+            if X.dtype == object and X.shape[1] == 2:
+                # Array-valued columns (wavelengths and intensities as arrays)
+                X = pd.DataFrame({
+                    "wavelengths": X[:, 0],
+                    "intensities": X[:, 1]
+                })
+            elif X.shape[1] == 2:
+                # Regular 2-column array
+                X = pd.DataFrame(X, columns=["wavelengths", "intensities"])
+            else:
+                raise ValueError(f"Expected 2 columns (wavelengths, intensities), got {X.shape[1]}")
+
         base_features_list = [
             self._extract_base_features(row) for _, row in X.iterrows()
         ]
@@ -292,28 +421,26 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         index_to_use = X.index if hasattr(X, 'index') else None
         base_features_df = pd.DataFrame(base_features_list, index=index_to_use)
 
-        p_area = (
-            base_features_df["M_I_peak_0"]
-            if "M_I_peak_0" in base_features_df
-            else pd.Series(np.nan, index=base_features_df.index)
-        )
-        c_area = (
-            base_features_df["C_I_peak_0"]
-            if "C_I_peak_0" in base_features_df
-            else pd.Series(np.nan, index=base_features_df.index)
-        )
+        # Extract K_I and C_I areas for ratio calculation
+        if "K_I_peak_0" not in base_features_df:
+            raise ValueError("K_I_peak_0 not found in base features. Ensure potassium (K_I) region is properly defined and extracted.")
+        if "C_I_peak_0" not in base_features_df:
+            raise ValueError("C_I_peak_0 not found in base features. Ensure carbon (C_I) region is properly defined and extracted.")
+        
+        k_area = base_features_df["K_I_peak_0"].fillna(0.0)
+        c_area = base_features_df["C_I_peak_0"].fillna(1e-6)
 
-        # Calculate PC_ratio with clipping to prevent extreme values
-        mc_ratio_raw = p_area / c_area.replace(0, 1e-6)
-        base_features_df["M_C_ratio"] = np.clip(mc_ratio_raw, -50.0, 50.0)
+        # Calculate KC_ratio with clipping to prevent extreme values
+        kc_ratio_raw = k_area / c_area.replace(0, 1e-6)
+        base_features_df["K_C_ratio"] = np.clip(kc_ratio_raw, -50.0, 50.0)
 
         # Choose feature generation method based on config
-        if self.config.use_focused_magnesium_features:
-            full_features_df, _ = generate_focused_magnesium_features(
+        if self.config.use_focused_potassium_features:
+            full_features_df, _ = generate_focused_potassium_features(
                 base_features_df, self._all_simple_names
             )
         else:
-            full_features_df, _ = generate_high_magnesium_features(
+            full_features_df, _ = generate_high_potassium_features(
                 base_features_df, self._all_simple_names
             )
 
@@ -338,7 +465,7 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
                     len([n for n in expected_features if 'peak_' in n and 'simple' not in n])
                 )
                 logger.error("Simple features count: %d", len(self._all_simple_names))
-                logger.error("High P features count: %d", len(self._high_p_names))
+                logger.error("High K features count: %d", len(self._high_k_names))
                 logger.error(
                     "Enhanced features count: %d",
                     len([n for n in expected_features if any(x in n for x in ['ratio', 'fwhm', 'asymmetry'])])
@@ -348,13 +475,27 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
                 f"Cannot proceed with duplicate feature names: {list(duplicates.keys())[:10]}"
             )
 
+        # Check for missing features before reindexing
+        missing_features = [f for f in expected_features if f not in full_features_df.columns]
+        if missing_features:
+            logger.warning("Missing %d features during final reindexing, filling with zeros: %s",
+                         len(missing_features), missing_features[:10])
+
         final_df = full_features_df.reindex(
-            columns=expected_features, fill_value=np.nan
+            columns=expected_features, fill_value=0.0
         )
 
         # Ensure the final dataframe maintains the original index
         if hasattr(X, 'index'):
             final_df.index = X.index
+
+        # Final NaN check and cleanup
+        if final_df.isnull().any().any():
+            nan_count = final_df.isnull().sum().sum()
+            nan_cols = final_df.columns[final_df.isnull().any()].tolist()
+            logger.warning(f"[FEATURE ENGINEERING] Found {nan_count} NaN values in columns: {nan_cols[:10]}...")
+            logger.warning("Filling NaN values with 0.0 to prevent downstream issues")
+            final_df = final_df.fillna(0.0)
 
         logger.info(
             "Transformed data into %d features for strategy '%s'.",
@@ -369,45 +510,116 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         intensities = np.asarray(row["intensities"])
 
         if intensities.size == 0:
-            # Return NaN for all expected features instead of empty dict
+            # Return empty dict for empty intensities
+            sample_id = row.get(self.config.sample_id_column, "unknown")
             logger.warning(
-                "Empty intensities found for sample, returning NaN features"
+                "Empty intensities found for sample %s, cannot extract any features", sample_id
             )
+            logger.warning("Expected to extract features for %d regions: %s",
+                         len(self._regions),
+                         [r.element for r in self._regions])
             return {}
 
-        for region in self.config.all_regions:
-            helper_region = HelperPeakRegion(
-                region.element,
-                region.lower_wavelength,
-                region.upper_wavelength,
-                region.center_wavelengths,
-            )
-            features.update(
-                extract_full_simple_features(helper_region, wavelengths, intensities)
-            )
+        sample_id = row.get(self.config.sample_id_column, "unknown")
+        for region in self._regions:
+            try:
+                helper_region = HelperPeakRegion(
+                    region.element,
+                    region.lower_wavelength,
+                    region.upper_wavelength,
+                    region.center_wavelengths,
+                )
+                region_features = extract_full_simple_features(helper_region, wavelengths, intensities)
+                features.update(region_features)
+
+                if not region_features:
+                    logger.warning("No features extracted for region %s (%.1f-%.1f nm) in sample %s",
+                                 region.element, region.lower_wavelength, region.upper_wavelength, sample_id)
+
+            except Exception as e:
+                logger.error("Failed to extract features for region %s (%.1f-%.1f nm) in sample %s: %s",
+                           region.element, region.lower_wavelength, region.upper_wavelength, sample_id, e)
+                # Continue processing other regions
 
         # Ensure intensities is 2D for the extractor (expects n_wavelengths x n_spectra)
         spectra_2d = (
             intensities.reshape(-1, 1) if intensities.ndim == 1 else intensities
         )
 
-        fit_results = self.extractor.extract_features(
-            wavelengths=wavelengths,
-            spectra=spectra_2d,
-            regions=_convert_to_results_regions(self.config.all_regions),
-            peak_shapes=self.config.peak_shapes * len(self.config.all_regions),
-        )
-        for res in fit_results.fitting_results:
-            element = res.region_result.region.element
-            for i, area in enumerate(res.peak_areas):
-                features[f"{element}_peak_{i}"] = area
+        try:
+            fit_results = self.extractor.extract_features(
+                wavelengths=wavelengths,
+                spectra=spectra_2d,
+                regions=_convert_to_results_regions(self._regions),
+                peak_shapes=self.config.peak_shapes * len(self._regions),
+            )
+
+            complex_features_extracted = 0
+            for res in fit_results.fitting_results:
+                element = res.region_result.region.element
+                element_features_count = 0
+
+                # Extract peak areas (original feature)
+                for i, area in enumerate(res.peak_areas):
+                    features[f"{element}_peak_{i}"] = area
+                    element_features_count += 1
+                    complex_features_extracted += 1
+
+                # === EXTRACT PHYSICS-INFORMED FEATURES (NEW) ===
+                for i, peak_fit in enumerate(res.fit_results):
+                    # FWHM - Full Width at Half Maximum
+                    features[f"{element}_fwhm_{i}"] = peak_fit.fwhm
+
+                    # Gamma (Stark broadening parameter)
+                    features[f"{element}_gamma_{i}"] = peak_fit.gamma
+
+                    # Fit quality (R²)
+                    features[f"{element}_fit_quality_{i}"] = peak_fit.fit_quality
+
+                    # Peak asymmetry (self-absorption indicator)
+                    features[f"{element}_asymmetry_{i}"] = peak_fit.peak_asymmetry
+
+                    # Amplitude (peak height for Lorentzian)
+                    features[f"{element}_amplitude_{i}"] = peak_fit.amplitude
+
+                    # Kurtosis (tailedness of peak distribution)
+                    features[f"{element}_kurtosis_{i}"] = peak_fit.kurtosis
+
+                    # Derived feature: FWHM × Asymmetry (absorption strength)
+                    features[f"{element}_absorption_index_{i}"] = peak_fit.fwhm * abs(peak_fit.peak_asymmetry)
+
+                if element_features_count == 0:
+                    logger.warning("No complex peak features extracted for element %s in sample %s",
+                                 element, sample_id)
+
+            if complex_features_extracted == 0:
+                logger.warning("No complex peak features extracted for any element in sample %s", sample_id)
+
+        except Exception as e:
+            logger.error("Failed to extract complex features for sample %s: %s", sample_id, e)
 
         # Add enhanced features if enabled
         if self._use_enhanced:
-            enhanced_feats = self.enhanced_features.transform(
-                features, wavelengths, intensities
-            )
-            features.update(enhanced_feats)
+            try:
+                enhanced_feats = self.enhanced_features.transform(
+                    features, wavelengths, intensities
+                )
+
+                if enhanced_feats:
+                    features.update(enhanced_feats)
+                    logger.debug("Extracted %d enhanced features for sample %s",
+                               len(enhanced_feats), sample_id)
+                else:
+                    logger.warning("No enhanced features extracted for sample %s", sample_id)
+
+            except Exception as e:
+                logger.error("Failed to extract enhanced features for sample %s: %s", sample_id, e)
+
+        # Log summary of extracted features
+        if features:
+            logger.debug("Successfully extracted %d features for sample %s", len(features), sample_id)
+        else:
+            logger.warning("No features extracted for sample %s", sample_id)
 
         return features
 
@@ -418,13 +630,24 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         """
         # Define all possible base feature names
         all_complex_names = []
-        for region in self.config.all_regions:
+        physics_informed_names = []  # NEW: Physics-informed features
+        for region in self._regions:
             for i in range(region.n_peaks):
+                # Original peak area feature
                 all_complex_names.append(f"{region.element}_peak_{i}")
+
+                # NEW: Physics-informed features from Lorentzian fits
+                physics_informed_names.append(f"{region.element}_fwhm_{i}")
+                physics_informed_names.append(f"{region.element}_gamma_{i}")
+                physics_informed_names.append(f"{region.element}_fit_quality_{i}")
+                physics_informed_names.append(f"{region.element}_asymmetry_{i}")
+                physics_informed_names.append(f"{region.element}_amplitude_{i}")
+                physics_informed_names.append(f"{region.element}_kurtosis_{i}")
+                physics_informed_names.append(f"{region.element}_absorption_index_{i}")
 
         # This list of 48 features is now correct
         self._all_simple_names = []
-        for region in self.config.all_regions:
+        for region in self._regions:
             prefix = f"{region.element}_simple"
             self._all_simple_names.extend(
                 [
@@ -447,14 +670,14 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         sample_base_df = pd.DataFrame([self._extract_base_features(X_sample.iloc[0])])
         self._use_enhanced = use_enhanced_temp
 
-        sample_base_df["M_C_ratio"] = 0.0
+        sample_base_df["K_C_ratio"] = 0.0
         # Choose feature generation method based on config for feature name determination
-        if self.config.use_focused_magnesium_features:
-            _, self._high_p_names = generate_focused_magnesium_features(
+        if self.config.use_focused_potassium_features:
+            _, self._high_k_names = generate_focused_potassium_features(
                 sample_base_df, self._all_simple_names
             )
         else:
-            _, self._high_p_names = generate_high_magnesium_features(
+            _, self._high_k_names = generate_high_potassium_features(
                 sample_base_df, self._all_simple_names
             )
 
@@ -470,30 +693,37 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
             )
             enhanced_names = list(enhanced_sample.keys())
 
-        if self.strategy == "Mg_only":
-            m_complex = [name for name in all_complex_names if name.startswith("M_I_")]
-            m_simple = [
-                name for name in self._all_simple_names if name.startswith("M_I_simple")
+        if self.strategy == "K_only":
+            # Include all K_I features (K_I_, K_I_404_) and K_C_ratio
+            k_complex = [name for name in all_complex_names if name.startswith("K_I")]
+            k_simple = [
+                name for name in self._all_simple_names if name.startswith("K_I")
             ]
-            m_enhanced = [
-                name
-                for name in enhanced_names
-                if "Mg" in name or "magnesium" in name.lower()
+            # Include all enhanced K features (ratios now have real values from extracted regions)
+            k_enhanced = [
+                name for name in enhanced_names
+                if "K" in name or "potassium" in name.lower()
             ]
-            self.feature_names_out_ = m_complex + m_simple + m_enhanced
+            # NEW: Include physics-informed features for K
+            k_physics = [name for name in physics_informed_names if name.startswith("K_I")]
+
+            # Always add K_C_ratio (critical potassium indicator, computed separately)
+            self.feature_names_out_ = k_complex + k_physics + k_simple + k_enhanced + ["K_C_ratio"] + self._high_k_names
         elif self.strategy == "simple_only":
             self.feature_names_out_ = (
                 self._all_simple_names
-                + ["M_C_ratio"]
-                + self._high_p_names
+                + physics_informed_names  # NEW: Add physics-informed features
+                + ["K_C_ratio"]
+                + self._high_k_names
                 + enhanced_names
             )
         elif self.strategy == "full_context":
             self.feature_names_out_ = (
                 all_complex_names
+                + physics_informed_names  # NEW: Add physics-informed features
                 + self._all_simple_names
-                + ["M_C_ratio"]
-                + self._high_p_names
+                + ["K_C_ratio"]
+                + self._high_k_names
                 + enhanced_names
             )
         else:
@@ -510,7 +740,7 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
             logger.error("  Strategy: %s", self.strategy)
             logger.error("  Complex names count: %d", len(all_complex_names))
             logger.error("  Simple names count: %d", len(self._all_simple_names))
-            logger.error("  High P names: %s", self._high_p_names)
+            logger.error("  High K names: %s", self._high_k_names)
             logger.error("  Enhanced names count: %d", len(enhanced_names))
             raise ValueError(
                 f"Duplicate feature names generated: {list(duplicates.keys())}"
@@ -530,8 +760,8 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         fit_results = self.extractor.extract_features(
             wavelengths=wavelengths,
             spectra=spectra_2d,
-            regions=_convert_to_results_regions(self.config.all_regions),
-            peak_shapes=self.config.peak_shapes * len(self.config.all_regions),
+            regions=_convert_to_results_regions(self._regions),
+            peak_shapes=self.config.peak_shapes * len(self._regions),
             fitting_mode=self.config.fitting_mode,
             baseline_correction=self.config.baseline_correction,
         )
@@ -540,7 +770,7 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
             for res in fit_results.fitting_results
         }
 
-        for region in self.config.all_regions:
+        for region in self._regions:
             areas = element_to_areas.get(region.element, [np.nan] * region.n_peaks)
             for i, area in enumerate(areas):
                 features[f"{region.element}_peak_{i}"] = area
@@ -548,27 +778,27 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
                 self._extract_simple_region_features(region, wavelengths, intensities)
             )
 
-        m_area, c_area = (
-            features.get("M_I_peak_0", np.nan),
+        k_area, c_area = (
+            features.get("K_I_peak_0", np.nan),
             features.get("C_I_peak_0", np.nan),
         )
-        mc_ratio = (
-            m_area / c_area
-            if not np.isnan(m_area) and not np.isnan(c_area) and c_area > 1e-6
+        kc_ratio = (
+            k_area / c_area
+            if not np.isnan(k_area) and not np.isnan(c_area) and c_area > 1e-6
             else np.nan
         )
 
-        # Clip PC_ratio to reasonable bounds to prevent extreme values in derived features
-        if not np.isnan(mc_ratio):
-            mc_ratio = np.clip(mc_ratio, -50.0, 50.0)
+        # Clip KC_ratio to reasonable bounds to prevent extreme values in derived features
+        if not np.isnan(kc_ratio):
+            kc_ratio = np.clip(kc_ratio, -50.0, 50.0)
 
         features.update(
             {
-                "M_C_ratio": mc_ratio,
-                "MC_ratio_squared": mc_ratio**2 if not np.isnan(mc_ratio) else np.nan,
-                "MC_ratio_cubic": mc_ratio**3 if not np.isnan(mc_ratio) else np.nan,
-                "MC_ratio_log": np.log1p(np.abs(mc_ratio))
-                if not np.isnan(mc_ratio)
+                "K_C_ratio": kc_ratio,
+                "KC_ratio_squared": kc_ratio**2 if not np.isnan(kc_ratio) else np.nan,
+                "KC_ratio_cubic": kc_ratio**3 if not np.isnan(kc_ratio) else np.nan,
+                "KC_ratio_log": np.log1p(np.abs(kc_ratio))
+                if not np.isnan(kc_ratio)
                 else np.nan,
             }
         )
@@ -578,7 +808,7 @@ class SpectralFeatureGenerator(BaseEstimator, TransformerMixin):
         return self.feature_names_out_
 
     def _get_empty_features(self) -> Dict[str, Any]:
-        return {name: np.nan for name in self.get_feature_names_out()}
+        return {name: 0.0 for name in self.get_feature_names_out()}
 
     def _extract_simple_region_features(
         self, region: PeakRegion, wavelengths: np.ndarray, intensities: np.ndarray
@@ -635,7 +865,7 @@ def create_feature_pipeline(
     
     Args:
         config: Pipeline configuration
-        strategy: Feature strategy ('Mg_only', 'simple_only', 'full_context')
+        strategy: Feature strategy ('K_only', 'simple_only', 'full_context')
         exclude_scaler: Whether to exclude StandardScaler from pipeline
         use_parallel: Whether to use parallel processing for feature generation
         n_jobs: Number of parallel jobs (-1 for all cores, -2 for all but one)
@@ -654,6 +884,7 @@ def create_feature_pipeline(
             steps.append(("scaler", PandasStandardScaler()))
 
         pipeline = Pipeline(steps)
+
         scaler_info = (
             "with StandardScaler" if not exclude_scaler else "without StandardScaler"
         )
@@ -688,6 +919,7 @@ def create_feature_pipeline(
             steps.append(("scaler", PandasStandardScaler()))
 
         pipeline = Pipeline(steps)
+
         scaler_info = (
             "without StandardScaler" if exclude_scaler else "with StandardScaler"
         )

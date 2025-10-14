@@ -583,7 +583,7 @@ class Config(BaseModel):
     wavelength_resolution: float = 0.1  # nm resolution for standardized grid
     
     # Feature Selection Configuration - to handle high-dimension/low-sample scenario
-    use_feature_selection: bool = True  # Enable/disable feature selection
+    use_feature_selection: bool = False  # Enable/disable feature selection
     feature_selection_method: Literal['selectkbest', 'rfe', 'lasso', 'mutual_info', 'tree_importance'] = 'selectkbest'
     n_features_to_select: Union[int, float] = 80 # Number of features to select (int) or fraction (float < 1.0)
     feature_selection_score_func: Literal['f_regression', 'mutual_info_regression'] = 'f_regression'
@@ -848,7 +848,7 @@ class Config(BaseModel):
     
     @property
     def raw_data_dir_path(self) -> Path:
-        return Path(self.__dict__.get('_raw_data_dir', f'{get_base_path()}/data/raw/latest_raw_data_091025'))
+        return Path(self.__dict__.get('_raw_data_dir', f'{get_base_path()}/data/raw/10-14-2025'))
     
     @property
     def processed_data_dir_path(self) -> Path:
@@ -884,7 +884,7 @@ class Config(BaseModel):
     
     @property
     def reference_data_path_obj(self) -> Path:
-        return Path(self.__dict__.get('_reference_data_path', f'{get_base_path()}/data/reference_data/lab_Element_Rough_latest.xlsx'))
+        return Path(self.__dict__.get('_reference_data_path', f'{get_base_path()}/data/reference_data/lab_Element_Rough_141025_corrected.xlsx'))
     
     # Properties that return Path objects for existing code compatibility
     @property 
@@ -893,7 +893,7 @@ class Config(BaseModel):
     
     @property
     def raw_data_dir(self) -> Path:
-        return Path(self.__dict__.get('_raw_data_dir', f'{get_base_path()}/data/raw/latest_raw_data_091025'))
+        return Path(self.__dict__.get('_raw_data_dir', f'{get_base_path()}/data/raw/10-14-2025'))
     
     @property
     def processed_data_dir(self) -> Path:
@@ -929,7 +929,7 @@ class Config(BaseModel):
     
     @property
     def reference_data_path(self) -> Path:
-        return Path(self.__dict__.get('_reference_data_path', f'{get_base_path()}/data/reference_data/lab_Element_Rough_latest.xlsx'))
+        return Path(self.__dict__.get('_reference_data_path', f'{get_base_path()}/data/reference_data/lab_Element_Rough_141025_corrected.xlsx'))
 
     def ensure_paths_exist(self, create_dirs: bool = True) -> None:
         """Ensure all required directories exist, optionally creating them."""
@@ -1021,16 +1021,16 @@ def get_base_path() -> Path:
 BASE_PATH = get_base_path()
 
 config = Config(
-    run_timestamp="placeholder", 
-    _data_dir=str(BASE_PATH / "data"), 
-    _raw_data_dir=str(BASE_PATH / "data" / "raw" / "latest_raw_data_091025"), 
+    run_timestamp="placeholder",
+    _data_dir=str(BASE_PATH / "data"),
+    _raw_data_dir=str(BASE_PATH / "data" / "raw" / "10-14-2025"),
     _processed_data_dir=str(BASE_PATH / "data" / "processed"),
-    _model_dir=str(BASE_PATH / "models"), 
-    _reports_dir=str(BASE_PATH / "reports"), 
-    _log_dir=str(BASE_PATH / "logs"), 
-    _reference_data_path=str(BASE_PATH / "data" / "reference_data" / "lab_Element_Rough_latest.xlsx"), 
-    _bad_files_dir=str(BASE_PATH / "bad_files"), 
-    _averaged_files_dir=str(BASE_PATH / "data" / "averaged_files_per_sample"), 
-    _cleansed_files_dir=str(BASE_PATH / "data" / "cleansed_files_per_sample"), 
+    _model_dir=str(BASE_PATH / "models"),
+    _reports_dir=str(BASE_PATH / "reports"),
+    _log_dir=str(BASE_PATH / "logs"),
+    _reference_data_path=str(BASE_PATH / "data" / "reference_data" / "lab_Element_Rough_141025_corrected.xlsx"),
+    _bad_files_dir=str(BASE_PATH / "bad_files"),
+    _averaged_files_dir=str(BASE_PATH / "data" / "averaged_files_per_sample"),
+    _cleansed_files_dir=str(BASE_PATH / "data" / "cleansed_files_per_sample"),
     _bad_prediction_files_dir=str(BASE_PATH / "bad_prediction_files")
 )

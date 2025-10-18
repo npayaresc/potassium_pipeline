@@ -583,12 +583,12 @@ class Config(BaseModel):
     wavelength_resolution: float = 0.1  # nm resolution for standardized grid
     
     # Feature Selection Configuration - to handle high-dimension/low-sample scenario
-    use_feature_selection: bool = False  # Enable/disable feature selection
+    use_feature_selection: bool = True # Enable/disable feature selection
     feature_selection_method: Literal['selectkbest', 'rfe', 'lasso', 'mutual_info', 'tree_importance'] = 'selectkbest'
-    n_features_to_select: Union[int, float] = 80 # Number of features to select (int) or fraction (float < 1.0)
+    n_features_to_select: Union[int, float] = 0.2 # Number of features to select (int) or fraction (float < 1.0)
     feature_selection_score_func: Literal['f_regression', 'mutual_info_regression'] = 'f_regression'
     # For SelectKBest
-    rfe_estimator: Literal['random_forest', 'xgboost', 'lightgbm'] = 'lightgbm'  # For RFE
+    rfe_estimator: Literal['random_forest', 'xgboost', 'lightgbm'] = 'random_forest'  # For RFE
     lasso_alpha: float = 0.01  # Alpha parameter for LASSO feature selection
     tree_importance_threshold: float = 0.001  # Minimum feature importance threshold
 
@@ -646,11 +646,14 @@ class Config(BaseModel):
         # Additional K I red doublet (intensity = 800, less common but useful for cross-validation)
         PeakRegion(element="K_I_691", lower_wavelength=690.5, upper_wavelength=694.5, center_wavelengths=[691.11, 693.88]),
 
-        # Keep magnesium lines for context and potential interference detection
-        PeakRegion(element="Mg_I_285", lower_wavelength=283.5, upper_wavelength=286.5, center_wavelengths=[285.2]),  # WIDENED: 1.5→3.0 nm
-        PeakRegion(element="Mg_I_383", lower_wavelength=382.0, upper_wavelength=385.0, center_wavelengths=[383.8]),  # WIDENED: 1.5→3.0 nm
-        PeakRegion(element="Mg_II", lower_wavelength=278.0, upper_wavelength=281.5, center_wavelengths=[279.55, 279.80, 280.27]),  # WIDENED: 2.0→3.5 nm (3 peaks)
-        
+        # MAGNESIUM FEATURES (2025-10-14):
+        # WIDENED: Increased wavelength ranges to ensure enough data points for FWHM calculations
+        # Previous ranges were too narrow (3-3.5 nm) causing NaN values in FWHM/asymmetry features
+        # New ranges (6-7 nm) provide sufficient spectral coverage for peak shape analysis
+        PeakRegion(element="Mg_I_285", lower_wavelength=282.0, upper_wavelength=288.5, center_wavelengths=[285.2]),  # WIDENED: 3.0→6.5 nm
+        PeakRegion(element="Mg_I_383", lower_wavelength=380.0, upper_wavelength=387.0, center_wavelengths=[383.8]),  # WIDENED: 3.0→7.0 nm
+        PeakRegion(element="Mg_II", lower_wavelength=276.0, upper_wavelength=283.0, center_wavelengths=[279.55, 279.80, 280.27]),  # WIDENED: 3.5→7.0 nm
+
         # Phosphorous region - kept from original pipeline for reference and comparative feature engineering
         PeakRegion(element="P_I_secondary", lower_wavelength=653.5, upper_wavelength=656.5, center_wavelengths=[654.5]),
     ]

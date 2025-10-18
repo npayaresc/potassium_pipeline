@@ -171,21 +171,27 @@ class SpectralPatternAnalyzer:
     
     def calculate_peak_fwhm(self, wavelengths: np.ndarray, intensities: np.ndarray,
                            peak_wavelength: float, window: float = 2.0) -> Dict[str, float]:
-        """Calculate Full Width at Half Maximum for a spectral peak."""
+        """Calculate Full Width at Half Maximum for a spectral peak.
+
+        Returns 0.0 for fwhm and asymmetry when calculation fails (e.g., weak/absent peaks)
+        instead of NaN to avoid downstream issues in feature engineering.
+        """
         # Handle 2D intensities by taking the mean across samples
         if intensities.ndim > 1:
             intensities = np.mean(intensities, axis=1)
 
         # Ensure we have matching dimensions
         if len(wavelengths) != len(intensities):
-            return {'fwhm': np.nan, 'asymmetry': np.nan}
+            logger.debug(f"[FWHM] Peak at {peak_wavelength:.2f} nm: dimension mismatch (wl={len(wavelengths)}, int={len(intensities)})")
+            return {'fwhm': 0.0, 'asymmetry': 0.0}
 
         # Select region around peak
         mask = (wavelengths >= peak_wavelength - window) & (wavelengths <= peak_wavelength + window)
         n_points = np.sum(mask)
 
         if not np.any(mask) or n_points < 5:
-            return {'fwhm': np.nan, 'asymmetry': np.nan}
+            logger.debug(f"[FWHM] Peak at {peak_wavelength:.2f} nm: insufficient data points (n={n_points}, window=±{window} nm) - no measurable peak")
+            return {'fwhm': 0.0, 'asymmetry': 0.0}
 
         peak_wl = wavelengths[mask]
         peak_int = intensities[mask]
@@ -194,7 +200,8 @@ class SpectralPatternAnalyzer:
         max_idx = np.argmax(peak_int)
 
         if max_idx >= len(peak_int):
-            return {'fwhm': np.nan, 'asymmetry': np.nan}
+            logger.debug(f"[FWHM] Peak at {peak_wavelength:.2f} nm: invalid peak maximum index - no measurable peak")
+            return {'fwhm': 0.0, 'asymmetry': 0.0}
 
         max_intensity = peak_int[max_idx]
         half_max = max_intensity / 2
@@ -225,16 +232,18 @@ class SpectralPatternAnalyzer:
             # Calculate asymmetry
             left_width = peak_wl[max_idx] - peak_wl[left_idx]
             right_width = peak_wl[right_idx] - peak_wl[max_idx]
-            asymmetry = (right_width - left_width) / (right_width + left_width) if (right_width + left_width) > 0 else 0
+            asymmetry = (right_width - left_width) / (right_width + left_width) if (right_width + left_width) > 0 else 0.0
 
-            # Validate results
+            # Validate results - return 0.0 for invalid values
             if fwhm <= 0 or np.isnan(fwhm):
-                return {'fwhm': np.nan, 'asymmetry': np.nan}
+                logger.debug(f"[FWHM] Peak at {peak_wavelength:.2f} nm: invalid FWHM value ({fwhm:.3f}) - no measurable peak")
+                return {'fwhm': 0.0, 'asymmetry': 0.0}
 
             return {'fwhm': float(fwhm), 'asymmetry': float(asymmetry)}
 
-        except Exception:
-            return {'fwhm': np.nan, 'asymmetry': np.nan}
+        except Exception as e:
+            logger.debug(f"[FWHM] Peak at {peak_wavelength:.2f} nm: calculation error ({type(e).__name__}) - no measurable peak")
+            return {'fwhm': 0.0, 'asymmetry': 0.0}
     
     def calculate_continuum_level(self, wavelengths: np.ndarray, intensities: np.ndarray,
                                  line_free_regions: List[Tuple[float, float]]) -> float:
@@ -291,13 +300,18 @@ class InterferenceCorrector:
     
     def calculate_self_absorption_indicator(self, peak_intensity: float, peak_area: float,
                                           peak_fwhm: float) -> float:
-        """Calculate indicator for self-absorption in strong lines."""
+        """Calculate indicator for self-absorption in strong lines.
+
+        Returns 0.0 when calculation fails (e.g., missing inputs or invalid fwhm)
+        instead of NaN to avoid downstream issues in feature engineering.
+        """
         if np.isnan(peak_intensity) or np.isnan(peak_area) or np.isnan(peak_fwhm) or peak_fwhm < 1e-6:
-            return np.nan
-        
+            logger.debug(f"[SELF-ABSORPTION] Calculation failed: intensity={peak_intensity:.3f}, area={peak_area:.3f}, fwhm={peak_fwhm:.3f} - no measurable self-absorption")
+            return 0.0
+
         # Expected area for Gaussian/Lorentzian peak
         expected_area = peak_intensity * peak_fwhm * np.sqrt(np.pi/np.log(2))
-        
+
         # Self-absorption causes area deficit
         absorption_indicator = 1.0 - (peak_area / expected_area)
         return np.clip(absorption_indicator, 0, 1)
@@ -336,7 +350,7 @@ class PlasmaStateIndicators:
 
 class EnhancedSpectralFeatures(BaseEstimator, TransformerMixin):
     """Main transformer that combines all enhanced features."""
-    
+
     def __init__(self, config):
         self.config = config
         self.molecular_detector = MolecularBandDetector()
@@ -345,11 +359,18 @@ class EnhancedSpectralFeatures(BaseEstimator, TransformerMixin):
         self.interference_corrector = InterferenceCorrector()
         self.plasma_indicators = PlasmaStateIndicators()
         self.feature_names_ = []
-        
+
+        # Cache available elements from config to avoid repeated lookups
+        self._available_elements = {region.element for region in self.config.all_regions}
+
     def fit(self, X, y=None):
         """Fit the transformer (determine feature names)."""
         # Feature names will be set during first transform
         return self
+
+    def _element_exists_in_config(self, element: str) -> bool:
+        """Check if an element exists in the configured regions."""
+        return element in self._available_elements
         
     def transform(self, X_features: Dict[str, float], wavelengths: np.ndarray, 
                   intensities: np.ndarray) -> Dict[str, float]:
@@ -376,17 +397,41 @@ class EnhancedSpectralFeatures(BaseEstimator, TransformerMixin):
         
         # 3. Spectral patterns
         if self.config.enable_spectral_patterns:
-            # FWHM for key lines - focus on K and competing cations
-            for element in ['Mg_I_285', 'Mg_II', 'CA_I_help', 'K_I', 'P_I_secondary']:
+            # FWHM for key lines - dynamically based on configured regions
+            # Priority elements for potassium prediction
+            priority_elements = ['K_I', 'CA_I_help', 'P_I_secondary', 'Mg_I_285', 'Mg_II']
+
+            # Element-specific window sizes (in nm) for FWHM calculation
+            # Mg peaks need wider windows due to weaker signal and broader peak shapes
+            element_windows = {
+                'K_I': 2.0,
+                'CA_I_help': 2.0,
+                'P_I_secondary': 2.0,
+                'Mg_I_285': 3.5,  # Wider window for Mg (285.2 nm line)
+                'Mg_II': 3.5,     # Wider window for Mg II (279-280 nm lines)
+            }
+
+            for element in priority_elements:
+                # Only process elements that exist in config
+                if not self._element_exists_in_config(element):
+                    continue
+
                 peak_wl = self._get_peak_wavelength(element)
                 if peak_wl:
+                    window = element_windows.get(element, 2.0)  # Default to 2.0 nm if not specified
                     fwhm_features = self.pattern_analyzer.calculate_peak_fwhm(
-                        wavelengths, intensities, peak_wl)
+                        wavelengths, intensities, peak_wl, window=window)
                     enhanced_features[f'{element}_fwhm'] = fwhm_features['fwhm']
                     enhanced_features[f'{element}_asymmetry'] = fwhm_features['asymmetry']
+
+                    # Log if peak measurement failed (returned 0.0)
+                    if fwhm_features['fwhm'] == 0.0:
+                        logger.debug(f"[ENHANCED FEATURES] Element '{element}': no measurable peak at {peak_wl:.2f} nm (weak/absent signal)")
                 else:
-                    enhanced_features[f'{element}_fwhm'] = np.nan
-                    enhanced_features[f'{element}_asymmetry'] = np.nan
+                    # Return 0.0 instead of NaN for missing peaks
+                    logger.debug(f"[ENHANCED FEATURES] Element '{element}': no peak wavelength configured")
+                    enhanced_features[f'{element}_fwhm'] = 0.0
+                    enhanced_features[f'{element}_asymmetry'] = 0.0
             
             # Continuum level - using regions typically free of emission lines in plant LIBS
             # These regions avoid major elemental lines while capturing baseline
@@ -402,27 +447,30 @@ class EnhancedSpectralFeatures(BaseEstimator, TransformerMixin):
         if self.config.enable_interference_correction:
             fe_features = self.interference_corrector.detect_fe_interference(wavelengths, intensities)
             enhanced_features.update(fe_features)
-            
-            # Self-absorption for strong Mg lines (important at high concentrations)
-            mg_intensity = X_features.get('Mg_I_285_peak_0', np.nan)  # Corrected name
-            mg_area = X_features.get('Mg_I_285_simple_peak_area', np.nan)  # Corrected name
-            mg_fwhm = enhanced_features.get('Mg_I_285_fwhm', np.nan)  # Corrected name
-            enhanced_features['Mg_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
-                mg_intensity, mg_area, mg_fwhm)
-            
-            # Check most prominent Mg line (285.2 nm) for self-absorption
-            mg_285_intensity = X_features.get('Mg_I_285_peak_0', np.nan)
-            mg_285_area = X_features.get('Mg_I_285_simple_peak_area', np.nan)
-            mg_285_fwhm = enhanced_features.get('Mg_I_285_fwhm', np.nan)
-            enhanced_features['Mg_285_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
-                mg_285_intensity, mg_285_area, mg_285_fwhm)
-            
-            # Also check Mg II ionic lines for self-absorption
-            mg_ii_intensity = X_features.get('Mg_II_peak_0', np.nan)
-            mg_ii_area = X_features.get('Mg_II_simple_peak_area', np.nan)
-            mg_ii_fwhm = enhanced_features.get('Mg_II_fwhm', np.nan)
-            enhanced_features['Mg_II_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
-                mg_ii_intensity, mg_ii_area, mg_ii_fwhm)
+
+            # Self-absorption for strong Mg lines (only if Mg regions are configured)
+            # This is important at high Mg concentrations but not needed if Mg is not being analyzed
+            if self._element_exists_in_config('Mg_I_285'):
+                mg_intensity = X_features.get('Mg_I_285_peak_0', np.nan)
+                mg_area = X_features.get('Mg_I_285_simple_peak_area', np.nan)
+                mg_fwhm = enhanced_features.get('Mg_I_285_fwhm', np.nan)
+                enhanced_features['Mg_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
+                    mg_intensity, mg_area, mg_fwhm)
+
+                # Check most prominent Mg line (285.2 nm) for self-absorption
+                mg_285_intensity = X_features.get('Mg_I_285_peak_0', np.nan)
+                mg_285_area = X_features.get('Mg_I_285_simple_peak_area', np.nan)
+                mg_285_fwhm = enhanced_features.get('Mg_I_285_fwhm', np.nan)
+                enhanced_features['Mg_285_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
+                    mg_285_intensity, mg_285_area, mg_285_fwhm)
+
+            # Check Mg II ionic lines for self-absorption (only if configured)
+            if self._element_exists_in_config('Mg_II'):
+                mg_ii_intensity = X_features.get('Mg_II_peak_0', np.nan)
+                mg_ii_area = X_features.get('Mg_II_simple_peak_area', np.nan)
+                mg_ii_fwhm = enhanced_features.get('Mg_II_fwhm', np.nan)
+                enhanced_features['Mg_II_self_absorption'] = self.interference_corrector.calculate_self_absorption_indicator(
+                    mg_ii_intensity, mg_ii_area, mg_ii_fwhm)
         
         # 5. Plasma indicators
         if self.config.enable_plasma_indicators:

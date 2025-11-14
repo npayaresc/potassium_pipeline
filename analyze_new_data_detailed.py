@@ -44,7 +44,7 @@ for i, col in enumerate(df_ref.columns, 1):
 print("\n" + "-" * 100)
 print("Sample of ID Columns (first 20 rows):")
 print("-" * 100)
-id_cols = ['Sample No.', 'Sample ID', 'Raw files_Sample ID', 'match']
+id_cols = ['Sample ID' ]
 df_sample = df_ref[id_cols].head(20)
 print(df_sample.to_string())
 

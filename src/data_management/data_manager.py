@@ -39,9 +39,16 @@ class DataManager:
         if not required_cols.issubset(df.columns):
             raise DataValidationError(f"Reference Excel must contain columns: {required_cols}")
 
+        # Convert target column to numeric, coercing errors (e.g., "n.d." strings) to NaN
+        original_count = len(df)
+        df[self.config.target_column] = pd.to_numeric(df[self.config.target_column], errors='coerce')
+
+        # Drop rows with NaN or non-positive target values
         df = df.dropna(subset=[self.config.target_column])
         df = df[df[self.config.target_column] > 0]
-        logger.info(f"Found {len(df)} samples with positive target values.")
+
+        non_numeric_count = original_count - len(df)
+        logger.info(f"Found {len(df)} samples with positive target values (removed {non_numeric_count} non-numeric/invalid entries).")
 
         if self.config.exclude_pot_samples:
             original_count = len(df)

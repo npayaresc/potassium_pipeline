@@ -802,7 +802,7 @@ class Config(BaseModel):
     project_name: str = "PotassiumPrediction"
     run_timestamp: str
     random_state: int = 42
-    use_gpu: bool = False  # Global GPU flag
+    use_gpu: bool = True  # Global GPU flag
 
     _data_dir: str
     _raw_data_dir: str
@@ -826,10 +826,10 @@ class Config(BaseModel):
 
     # ADDED: Configuration for target value filtering - focused on 0.2-0.5 range
     target_value_min: Optional[float] = (
-        4.0  # Focus closer to target range for better 0.2-0.5 performance
+        2.0  # Focus closer to target range for better 0.2-0.5 performance
     )
     target_value_max: Optional[float] = (
-        10.0  # Focus closer to target range for better 0.2-0.5 performance
+        15.0  # Focus closer to target range for better 0.2-0.5 performance
     )
     # Spectral Preprocessing Configuration
     use_spectral_preprocessing: bool = (
@@ -854,7 +854,7 @@ class Config(BaseModel):
         "selectkbest", "rfe", "lasso", "mutual_info", "tree_importance"
     ] = "selectkbest"
     n_features_to_select: Union[int, float] = (
-        0.25  # Number of features to select (int) or fraction (float < 1.0)
+        0.42  # Number of features to select (int) or fraction (float < 1.0)
     )
     feature_selection_score_func: Literal["f_regression", "mutual_info_regression"] = (
         "f_regression"
@@ -880,7 +880,7 @@ class Config(BaseModel):
         "models/K_only_catboost_20251009_141347_shap_importance.csv"  # Path to SHAP importance CSV file (e.g., "models/full_context_lightgbm_*_shap_importance.csv")
     )
     shap_top_n_features: int = (
-        40  # Number of top features to select based on SHAP importance
+        38  # Number of top features to select based on SHAP importance
     )
     shap_min_importance: Optional[float] = (
         None  # Minimum SHAP importance threshold (optional)
@@ -1172,7 +1172,7 @@ class Config(BaseModel):
         return regions
 
     # feature_strategies: List[str] = ["K_only", "simple_only", "full_context"]
-    feature_strategies: List[str] = ["K_only"]
+    feature_strategies: List[str] = ["simple_only"]
     peak_shapes: List[str] = ["lorentzian"]
     fitting_mode: str = "mean_first"
     baseline_correction: bool = True
@@ -1249,7 +1249,7 @@ class Config(BaseModel):
 
     # Sample weighting configuration for model training
     use_sample_weights: bool = (
-        False  # ENABLED GLOBALLY: Critical for handling extreme concentration ranges
+        True  # ENABLED GLOBALLY: Critical for handling extreme concentration ranges
     )
     sample_weight_method: Literal[
         "legacy", "improved", "weighted_r2", "distribution_based", "hybrid"
